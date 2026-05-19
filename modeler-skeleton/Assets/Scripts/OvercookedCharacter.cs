@@ -40,8 +40,17 @@ public class OvercookedCharacter : MonoBehaviour
     public KeyCode pickupGamepad = KeyCode.JoystickButton0; // Xbox A
     public KeyCode actionGamepad = KeyCode.JoystickButton2; // Xbox X
 
+    [Header("Interaction")]
+    [Tooltip("Where held items parent to. Auto-created in front of torso if null.")]
+    public Transform holdAnchor;
+    public Vector3 holdAnchorLocalPos = new Vector3(0f, 3.4f, 1.1f);
+    public float interactRange = 1.5f;
+    public float interactHeight = 1.5f;
+    public LayerMask interactMask = ~0;
+    public bool drawInteractGizmo = true;
+
     [Header("State (read-only)")]
-    public Transform heldItem;
+    public Pickupable heldItem;
 
     private CharacterController controller;
     private Transform leftArm;
@@ -58,6 +67,7 @@ public class OvercookedCharacter : MonoBehaviour
     private float verticalVelocity;
 
     public bool IsHolding => heldItem != null;
+    public Pickupable Held => heldItem;
 
     private void Start()
     {
@@ -88,6 +98,15 @@ public class OvercookedCharacter : MonoBehaviour
         {
             rightArmRestRot = rightArm.localRotation;
             rightArmRestPos = rightArm.localPosition;
+        }
+
+        if (holdAnchor == null)
+        {
+            GameObject anchor = new GameObject("HoldAnchor");
+            anchor.transform.SetParent(transform, false);
+            anchor.transform.localPosition = holdAnchorLocalPos;
+            anchor.transform.localRotation = Quaternion.identity;
+            holdAnchor = anchor.transform;
         }
     }
 
@@ -222,16 +241,49 @@ public class OvercookedCharacter : MonoBehaviour
 
     private void OnPickupPressed()
     {
-        // Stub — real pickup/drop dispatch lands in step 2.
+        Station station = FindFacingStation();
+        if (station == null) return;
+
         if (IsHolding)
-            Debug.Log("[Overcooked] Drop pressed (no station logic yet)");
+        {
+            if (station.TryPlace(heldItem))
+                heldItem = null;
+        }
         else
-            Debug.Log("[Overcooked] Pickup pressed (no station logic yet)");
+        {
+            Pickupable taken = station.TryTake();
+            if (taken != null)
+            {
+                heldItem = taken;
+                heldItem.OnPickedUp(holdAnchor);
+            }
+        }
     }
 
     private void OnActionPressed()
     {
         // Stub — context action (cut/wash/extinguish) lands in step 3.
-        Debug.Log("[Overcooked] Action pressed (no station logic yet)");
+        Station station = FindFacingStation();
+        Debug.Log($"[Overcooked] Action pressed (facing: {(station ? station.kind.ToString() : "none")}, holding: {(IsHolding ? heldItem.kind.ToString() : "nothing")})");
+    }
+
+    private Station FindFacingStation()
+    {
+        Vector3 origin = transform.position + Vector3.up * interactHeight;
+        Vector3 dir = transform.forward;
+        if (Physics.Raycast(origin, dir, out RaycastHit hit, interactRange, interactMask, QueryTriggerInteraction.Collide))
+        {
+            return hit.collider.GetComponentInParent<Station>();
+        }
+        return null;
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        if (!drawInteractGizmo) return;
+        Gizmos.color = Color.cyan;
+        Vector3 origin = transform.position + Vector3.up * interactHeight;
+        Gizmos.DrawLine(origin, origin + transform.forward * interactRange);
+        Gizmos.DrawWireSphere(origin + transform.forward * interactRange, 0.05f);
     }
 }
