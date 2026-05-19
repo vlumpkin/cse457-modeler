@@ -58,3 +58,6 @@ modeler-skeleton/[Aa]ssets/[Ss]treamingAssets/aa/*
 # Logs / misc
 modeler-skeleton/debug.log
 *.log
+
+# Local notes
+free-3d-asset-libraries.txt
