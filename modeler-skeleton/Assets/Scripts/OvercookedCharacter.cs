@@ -24,9 +24,11 @@ public class OvercookedCharacter : MonoBehaviour
     public float rightArmMax = 20f;
     public float armSwingFrequency = 6f;
 
-    [Header("Carry pose (arm container local position)")]
-    public Vector3 leftCarryPos = new Vector3(-0.3f, 0f, 0.3f);
-    public Vector3 rightCarryPos = new Vector3(0.3f, 0f, 0.3f);
+    [Header("Carry pose (arm container local position + Z roll)")]
+    public Vector3 leftCarryPos = new Vector3(-0.6f, 3.2f, 0.8f);
+    public Vector3 rightCarryPos = new Vector3(0.6f, 3.2f, 0.8f);
+    public Vector3 leftCarryEuler = new Vector3(0f, 0f, -7f);
+    public Vector3 rightCarryEuler = new Vector3(0f, 0f, 7f);
 
     [Header("Hierarchy paths (relative to this Frame)")]
     public string leftArmContainerName = "Left Arm Container";
@@ -208,13 +210,13 @@ public class OvercookedCharacter : MonoBehaviour
     {
         if (leftArm != null)
         {
-            leftArm.localPosition = new Vector3(leftCarryPos.x, leftArmRestPos.y, leftCarryPos.z);
-            leftArm.localRotation = leftArmRestRot;
+            leftArm.localPosition = leftCarryPos;
+            leftArm.localRotation = leftArmRestRot * Quaternion.Euler(leftCarryEuler);
         }
         if (rightArm != null)
         {
-            rightArm.localPosition = new Vector3(rightCarryPos.x, rightArmRestPos.y, rightCarryPos.z);
-            rightArm.localRotation = rightArmRestRot;
+            rightArm.localPosition = rightCarryPos;
+            rightArm.localRotation = rightArmRestRot * Quaternion.Euler(rightCarryEuler);
         }
     }
 
