@@ -23,18 +23,23 @@ public class Pickupable : MonoBehaviour
             foreach (var c in cachedColliders) c.enabled = false;
         }
 
-        transform.SetParent(anchor, false);
-        transform.localPosition = Vector3.zero;
-        transform.localRotation = Quaternion.identity;
+        SnapTo(anchor);
     }
 
     public void OnPlaced(Transform slot)
     {
-        transform.SetParent(slot, false);
-        transform.localPosition = Vector3.zero;
-        transform.localRotation = Quaternion.identity;
+        SnapTo(slot);
 
         if (cachedColliders != null)
             foreach (var c in cachedColliders) c.enabled = true;
+    }
+
+    private void SnapTo(Transform target)
+    {
+        // SetParent(target, true) preserves world scale by adjusting localScale.
+        // Then zero localPosition/Rotation so we snap to the anchor.
+        transform.SetParent(target, true);
+        transform.localPosition = Vector3.zero;
+        transform.localRotation = Quaternion.identity;
     }
 }
