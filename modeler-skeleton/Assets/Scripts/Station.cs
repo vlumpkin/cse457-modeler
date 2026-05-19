@@ -16,6 +16,7 @@ public class Station : MonoBehaviour
     {
         if (placementAnchor == null) placementAnchor = transform;
         if (current == null) current = GetComponentInChildren<Pickupable>();
+        if (current != null) current.OnPlaced(placementAnchor);
     }
 
     public bool HasItem => current != null;

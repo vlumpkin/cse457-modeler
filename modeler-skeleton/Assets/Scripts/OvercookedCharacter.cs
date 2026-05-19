@@ -242,12 +242,23 @@ public class OvercookedCharacter : MonoBehaviour
     private void OnPickupPressed()
     {
         Station station = FindFacingStation();
-        if (station == null) return;
+        if (station == null)
+        {
+            Debug.Log("[Overcooked] Pickup pressed — no Station in front of character");
+            return;
+        }
 
         if (IsHolding)
         {
             if (station.TryPlace(heldItem))
+            {
+                Debug.Log($"[Overcooked] Placed {heldItem.kind} on {station.name}");
                 heldItem = null;
+            }
+            else
+            {
+                Debug.Log($"[Overcooked] {station.name} already has an item, can't place");
+            }
         }
         else
         {
@@ -256,6 +267,11 @@ public class OvercookedCharacter : MonoBehaviour
             {
                 heldItem = taken;
                 heldItem.OnPickedUp(holdAnchor);
+                Debug.Log($"[Overcooked] Picked up {taken.kind} from {station.name}");
+            }
+            else
+            {
+                Debug.Log($"[Overcooked] {station.name} is empty");
             }
         }
     }
