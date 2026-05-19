@@ -6,6 +6,12 @@ public class OvercookedCharacter : MonoBehaviour
     public float moveSpeed = 5f;
     public float turnSpeed = 720f;
     public float gravity = 20f;
+    public float worldFloorY = 0f;
+
+    [Header("CharacterController (only used if one isn't already attached)")]
+    public float controllerHeight = 2f;
+    public float controllerRadius = 0.4f;
+    public Vector3 controllerCenter = new Vector3(0f, 1f, 0f);
 
     [Header("Sway (Z-axis roll, degrees)")]
     public float swayAmplitude = 0.3f;
@@ -57,9 +63,9 @@ public class OvercookedCharacter : MonoBehaviour
         if (controller == null)
         {
             controller = gameObject.AddComponent<CharacterController>();
-            controller.height = 2f;
-            controller.radius = 0.4f;
-            controller.center = new Vector3(0f, 1f, 0f);
+            controller.height = controllerHeight;
+            controller.radius = controllerRadius;
+            controller.center = controllerCenter;
             controller.skinWidth = 0.02f;
         }
 
@@ -122,6 +128,14 @@ public class OvercookedCharacter : MonoBehaviour
         Vector3 horizontal = move * moveSpeed;
         Vector3 motion = (horizontal + Vector3.up * verticalVelocity) * Time.deltaTime;
         controller.Move(motion);
+
+        if (transform.position.y < worldFloorY)
+        {
+            Vector3 p = transform.position;
+            p.y = worldFloorY;
+            transform.position = p;
+            verticalVelocity = 0f;
+        }
     }
 
     private void ApplySway(bool moving)
