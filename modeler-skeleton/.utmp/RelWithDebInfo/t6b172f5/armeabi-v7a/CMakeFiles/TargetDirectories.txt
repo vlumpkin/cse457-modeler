@@ -1,5 +1,0 @@
-C:/Users/vmoos/Documents/Claude/Code/cse457-modeler/modeler-skeleton/.utmp/RelWithDebInfo/t6b172f5/armeabi-v7a/CMakeFiles/edit_cache.dir
-C:/Users/vmoos/Documents/Claude/Code/cse457-modeler/modeler-skeleton/.utmp/RelWithDebInfo/t6b172f5/armeabi-v7a/CMakeFiles/rebuild_cache.dir
-C:/Users/vmoos/Documents/Claude/Code/cse457-modeler/modeler-skeleton/.utmp/RelWithDebInfo/t6b172f5/armeabi-v7a/FramePacing/CMakeFiles/swappywrapper.dir
-C:/Users/vmoos/Documents/Claude/Code/cse457-modeler/modeler-skeleton/.utmp/RelWithDebInfo/t6b172f5/armeabi-v7a/FramePacing/CMakeFiles/edit_cache.dir
-C:/Users/vmoos/Documents/Claude/Code/cse457-modeler/modeler-skeleton/.utmp/RelWithDebInfo/t6b172f5/armeabi-v7a/FramePacing/CMakeFiles/rebuild_cache.dir
