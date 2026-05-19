@@ -1,0 +1,5 @@
+﻿<Solution>
+  <Project Path="LeanTouch.csproj" />
+  <Project Path="LeanCommon.csproj" />
+  <Project Path="Assembly-CSharp.csproj" />
+</Solution>
