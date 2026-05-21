@@ -3,36 +3,36 @@ using UnityEngine;
 public class OvercookedCharacter : MonoBehaviour
 {
     [Header("Movement")]
-    public float moveSpeed = 5f;
+    public float moveSpeed = 7.5f;
     public float turnSpeed = 720f;
     public float gravity = 20f;
     public float worldFloorY = 0f;
 
     [Header("CharacterController (only used if one isn't already attached)")]
     public float controllerHeight = 2f;
-    public float controllerRadius = 0.4f;
+    public float controllerRadius = 0.75f;
     public Vector3 controllerCenter = new Vector3(0f, 1f, 0f);
 
     [Header("Sway (Z-axis roll, degrees)")]
-    public float swayAmplitude = 0.3f;
-    public float swayFrequency = 6f;
+    public float swayAmplitude = 0.75f;
+    public float swayFrequency = 14f;
 
     [Header("Arm swing (empty hands, X-axis degrees)")]
     public float leftArmMin = -20f;
     public float leftArmMax = 13f;
     public float rightArmMin = -13f;
     public float rightArmMax = 20f;
-    public float armSwingFrequency = 6f;
+    public float armSwingFrequency = 14f;
 
     [Header("Carry pose (arm container local position + Z roll)")]
-    public Vector3 leftCarryPos = new Vector3(-0.6f, 3.2f, 0.8f);
-    public Vector3 rightCarryPos = new Vector3(0.6f, 3.2f, 0.8f);
-    public Vector3 leftCarryEuler = new Vector3(0f, 0f, -7f);
-    public Vector3 rightCarryEuler = new Vector3(0f, 0f, 7f);
+    public Vector3 leftCarryPos = new Vector3(-1f, 3f, 0.8f);
+    public Vector3 rightCarryPos = new Vector3(1f, 3f, 0.8f);
+    public Vector3 leftCarryEuler = new Vector3(0f, 0f, 23f);
+    public Vector3 rightCarryEuler = new Vector3(0f, 0f, -23f);
 
     [Header("Hierarchy paths (relative to this Frame)")]
-    public string leftArmContainerName = "Left Arm Container";
-    public string rightArmContainerName = "Right Arm Container";
+    public string leftArmContainerName = "left_arm_container";
+    public string rightArmContainerName = "right_arm_container";
 
     [Header("Input (keyboard)")]
     public KeyCode pickupKey = KeyCode.Space;
@@ -44,10 +44,27 @@ public class OvercookedCharacter : MonoBehaviour
     [Tooltip("Where held items parent to. Auto-created in front of torso if null.")]
     public Transform holdAnchor;
     public Vector3 holdAnchorLocalPos = new Vector3(0f, 3.4f, 1.1f);
-    public float interactRange = 1.5f;
+    [Tooltip("Optional separate anchor (e.g. PlacementAnchor child) whose local position CarryPose can override per item.")]
+    public Transform placementAnchor;
+    public float interactRange = 2.5f;
     public float interactHeight = 1.5f;
     public LayerMask interactMask = ~0;
     public bool drawInteractGizmo = true;
+    [Tooltip("Dot product threshold between forward and direction-to-station. 1=directly ahead, 0=90°, -1=behind. ~0.3 is roughly a 70° cone.")]
+    [Range(-1f, 1f)] public float facingDotThreshold = 0.3f;
+
+    [Header("Facing highlight")]
+    public bool showFacingHighlight = true;
+    public Color highlightColor = new Color(0.3f, 1f, 0.6f, 0.35f);
+    [Tooltip("Vertical offset above the station's top surface (avoids z-fighting).")]
+    public float highlightYOffset = 0.01f;
+    [Tooltip("Optional material. If left null, an unlit transparent material is generated at runtime.")]
+    public Material highlightMaterial;
+
+    [Header("Debug ray")]
+    public bool drawDebugRay = true;
+    public Color rayHitColor = Color.green;
+    public Color rayMissColor = Color.red;
 
     [Header("State (read-only)")]
     public Pickupable heldItem;
@@ -61,6 +78,13 @@ public class OvercookedCharacter : MonoBehaviour
     private Quaternion rightArmRestRot;
     private Vector3 leftArmRestPos;
     private Vector3 rightArmRestPos;
+    private Vector3 placementAnchorRestPos;
+    private bool hasPlacementAnchorRest;
+
+    private Station facingStation;
+    private GameObject highlightQuad;
+    private Transform highlightTf;
+    private MeshRenderer highlightRenderer;
 
     private float swayPhase;
     private float swingPhase;
@@ -100,6 +124,12 @@ public class OvercookedCharacter : MonoBehaviour
             rightArmRestPos = rightArm.localPosition;
         }
 
+        if (placementAnchor != null)
+        {
+            placementAnchorRestPos = placementAnchor.localPosition;
+            hasPlacementAnchorRest = true;
+        }
+
         if (holdAnchor == null)
         {
             GameObject anchor = new GameObject("HoldAnchor");
@@ -118,6 +148,8 @@ public class OvercookedCharacter : MonoBehaviour
         ApplyMovement(move);
         ApplySway(moving);
         ApplyArmPose(moving);
+
+        UpdateFacing();
 
         if (Input.GetKeyDown(pickupKey) || Input.GetKeyDown(pickupGamepad))
             OnPickupPressed();
@@ -185,6 +217,8 @@ public class OvercookedCharacter : MonoBehaviour
             return;
         }
 
+        ApplyPlacementAnchorOverride(null);
+
         if (moving)
         {
             swingPhase += armSwingFrequency * Time.deltaTime;
@@ -227,16 +261,46 @@ public class OvercookedCharacter : MonoBehaviour
 
     private void ApplyCarryPose()
     {
+        Vector3 lPos = leftCarryPos;
+        Vector3 rPos = rightCarryPos;
+        Vector3 lEuler = leftCarryEuler;
+        Vector3 rEuler = rightCarryEuler;
+
+        CarryPose pose = heldItem != null ? heldItem.GetComponent<CarryPose>() : null;
+        if (pose != null)
+        {
+            if (pose.overrideLeftPos)
+            {
+                lPos = pose.leftHandPos;
+                rPos = pose.GetMirroredRightPos();
+            }
+            if (pose.overrideLeftEuler)
+            {
+                lEuler = pose.leftHandEuler;
+                rEuler = pose.GetMirroredRightEuler();
+            }
+        }
+
+        ApplyPlacementAnchorOverride(pose);
+
         if (leftArm != null)
         {
-            leftArm.localPosition = leftCarryPos;
-            leftArm.localRotation = leftArmRestRot * Quaternion.Euler(leftCarryEuler);
+            leftArm.localPosition = lPos;
+            leftArm.localRotation = leftArmRestRot * Quaternion.Euler(lEuler);
         }
         if (rightArm != null)
         {
-            rightArm.localPosition = rightCarryPos;
-            rightArm.localRotation = rightArmRestRot * Quaternion.Euler(rightCarryEuler);
+            rightArm.localPosition = rPos;
+            rightArm.localRotation = rightArmRestRot * Quaternion.Euler(rEuler);
         }
+    }
+
+    private void ApplyPlacementAnchorOverride(CarryPose pose)
+    {
+        if (placementAnchor == null || !hasPlacementAnchorRest) return;
+        placementAnchor.localPosition = (pose != null && pose.overridePlacementAnchor)
+            ? pose.placementAnchorLocalPos
+            : placementAnchorRestPos;
     }
 
     private void OnPickupPressed()
@@ -283,15 +347,119 @@ public class OvercookedCharacter : MonoBehaviour
         Debug.Log($"[Overcooked] Action pressed (facing: {(station ? station.kind.ToString() : "none")}, holding: {(IsHolding ? heldItem.kind.ToString() : "nothing")})");
     }
 
-    private Station FindFacingStation()
+    private Station FindFacingStation() => facingStation;
+
+    private static readonly Collider[] facingBuffer = new Collider[32];
+
+    private void UpdateFacing()
     {
         Vector3 origin = transform.position + Vector3.up * interactHeight;
-        Vector3 dir = transform.forward;
-        if (Physics.Raycast(origin, dir, out RaycastHit hit, interactRange, interactMask, QueryTriggerInteraction.Collide))
+        Vector3 fwd = transform.forward;
+        Vector3 fwdFlat = new Vector3(fwd.x, 0f, fwd.z);
+        if (fwdFlat.sqrMagnitude > 0.0001f) fwdFlat.Normalize();
+
+        Station bestStation = null;
+        Collider bestCollider = null;
+        float bestDist = float.MaxValue;
+
+        int count = Physics.OverlapSphereNonAlloc(origin, interactRange, facingBuffer, interactMask, QueryTriggerInteraction.Collide);
+        for (int i = 0; i < count; i++)
         {
-            return hit.collider.GetComponentInParent<Station>();
+            Collider col = facingBuffer[i];
+            Station s = col.GetComponentInParent<Station>();
+            if (s == null) continue;
+
+            Vector3 closest = col.ClosestPoint(origin);
+            Vector3 toClosest = closest - origin;
+            float dist = toClosest.magnitude;
+            if (dist > interactRange) continue;
+
+            Vector3 toFlat = new Vector3(toClosest.x, 0f, toClosest.z);
+            if (toFlat.sqrMagnitude < 0.0001f)
+            {
+                // Character is essentially on top of the collider — accept it.
+            }
+            else
+            {
+                toFlat.Normalize();
+                if (Vector3.Dot(toFlat, fwdFlat) < facingDotThreshold) continue;
+            }
+
+            if (dist < bestDist)
+            {
+                bestDist = dist;
+                bestStation = s;
+                bestCollider = col;
+            }
         }
-        return null;
+
+        facingStation = bestStation;
+
+        if (drawDebugRay)
+        {
+            Color c = bestStation != null ? rayHitColor : rayMissColor;
+            Vector3 end = bestCollider != null ? bestCollider.ClosestPoint(origin) : origin + fwd * interactRange;
+            Debug.DrawLine(origin, end, c);
+        }
+
+        UpdateFacingHighlight(bestCollider);
+    }
+
+    private void UpdateFacingHighlight(Collider hitCollider)
+    {
+        if (!showFacingHighlight)
+        {
+            if (highlightQuad != null) highlightQuad.SetActive(false);
+            return;
+        }
+
+        if (facingStation == null || hitCollider == null)
+        {
+            if (highlightQuad != null) highlightQuad.SetActive(false);
+            return;
+        }
+
+        EnsureHighlightQuad();
+
+        Bounds b = hitCollider.bounds;
+        highlightTf.position = new Vector3(b.center.x, b.max.y + highlightYOffset, b.center.z);
+        highlightTf.rotation = Quaternion.Euler(90f, 0f, 0f); // flat on top
+        highlightTf.localScale = new Vector3(b.size.x, b.size.z, 1f);
+        highlightQuad.SetActive(true);
+    }
+
+    private void EnsureHighlightQuad()
+    {
+        if (highlightQuad != null) return;
+
+        highlightQuad = GameObject.CreatePrimitive(PrimitiveType.Quad);
+        highlightQuad.name = "FacingHighlight";
+        Object.Destroy(highlightQuad.GetComponent<Collider>());
+        highlightTf = highlightQuad.transform;
+        highlightRenderer = highlightQuad.GetComponent<MeshRenderer>();
+        highlightRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        highlightRenderer.receiveShadows = false;
+
+        Material mat = highlightMaterial;
+        if (mat == null)
+        {
+            Shader sh = Shader.Find("Universal Render Pipeline/Unlit")
+                ?? Shader.Find("Unlit/Transparent")
+                ?? Shader.Find("Sprites/Default");
+            mat = new Material(sh);
+            // Best-effort transparency setup for URP Unlit and built-in.
+            if (mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1f); // 1 = Transparent (URP)
+            if (mat.HasProperty("_Blend")) mat.SetFloat("_Blend", 0f);     // 0 = Alpha
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", highlightColor);
+            if (mat.HasProperty("_Color")) mat.SetColor("_Color", highlightColor);
+            mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            mat.SetInt("_ZWrite", 0);
+            mat.DisableKeyword("_SURFACE_TYPE_OPAQUE");
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+        }
+        highlightRenderer.sharedMaterial = mat;
     }
 
     private void OnDrawGizmosSelected()
