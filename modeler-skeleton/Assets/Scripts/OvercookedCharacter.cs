@@ -1,5 +1,7 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
+[RequireComponent(typeof(PlayerInput))]
 public class OvercookedCharacter : MonoBehaviour
 {
     [Header("Movement")]
@@ -35,20 +37,9 @@ public class OvercookedCharacter : MonoBehaviour
     public string rightArmContainerName = "right_arm_container";
 
     [Header("Input")]
-    [Tooltip("1-based controller slot. Player 1 reads JoystickN buttons and the axes below; player 2 reads the next joystick, etc. Set to 0 to listen to ANY joystick (legacy behavior).")]
-    [Range(0, 8)] public int playerIndex = 1;
-    public KeyCode pickupKey = KeyCode.Space;
-    public KeyCode actionKey = KeyCode.X;
-    [Tooltip("Xbox A on this player's joystick (button 0).")]
-    public KeyCode pickupGamepadButton = KeyCode.JoystickButton0;
-    [Tooltip("Xbox X on this player's joystick (button 2).")]
-    public KeyCode actionGamepadButton = KeyCode.JoystickButton2;
-    [Tooltip("Input Manager axis name for horizontal movement. Defaults to the built-in 'Horizontal'. For multiplayer, set per-player axes like 'Horizontal_P1', 'Horizontal_P2' and configure them in Project Settings > Input Manager.")]
-    public string horizontalAxis = "Horizontal";
-    public string verticalAxis = "Vertical";
-    [Tooltip("Radial deadzone applied to the stick vector (h,v). Stick magnitudes below this are treated as zero. 0.20-0.30 is typical for worn Xbox sticks.")]
-    [Range(0f, 0.5f)] public float stickDeadzone = 0.25f;
-    [Tooltip("Log connected joysticks at startup and any joystick button presses this character sees. Useful for figuring out which slot a controller is mapped to.")]
+    [Tooltip("Extra radial deadzone applied on top of the Input System's built-in stick deadzone. 0 = trust the asset's deadzone only.")]
+    [Range(0f, 0.5f)] public float stickDeadzone = 0.1f;
+    [Tooltip("Log pickup/action events and device pair/unpair changes for this character.")]
     public bool debugInput = false;
 
     [Header("Interaction")]
@@ -128,8 +119,60 @@ public class OvercookedCharacter : MonoBehaviour
     private float swingPhase;
     private float verticalVelocity;
 
+    private Vector2 moveInput;
+    private PlayerInput playerInput;
+
     public bool IsHolding => heldItem != null;
     public Pickupable Held => heldItem;
+
+    private void Awake()
+    {
+        playerInput = GetComponent<PlayerInput>();
+    }
+
+    private void OnEnable()
+    {
+        if (playerInput == null) playerInput = GetComponent<PlayerInput>();
+        playerInput.onDeviceLost += HandleDeviceLost;
+        playerInput.onDeviceRegained += HandleDeviceRegained;
+    }
+
+    private void OnDisable()
+    {
+        if (playerInput == null) return;
+        playerInput.onDeviceLost -= HandleDeviceLost;
+        playerInput.onDeviceRegained -= HandleDeviceRegained;
+    }
+
+    private void HandleDeviceLost(PlayerInput pi)
+    {
+        moveInput = Vector2.zero;
+        if (debugInput) Debug.Log($"[Overcooked][{name}] device lost (player {pi.playerIndex})");
+    }
+
+    private void HandleDeviceRegained(PlayerInput pi)
+    {
+        if (debugInput) Debug.Log($"[Overcooked][{name}] device regained (player {pi.playerIndex})");
+    }
+
+    public void OnMove(InputValue value)
+    {
+        moveInput = value.Get<Vector2>();
+    }
+
+    public void OnPickup(InputValue value)
+    {
+        if (!value.isPressed) return;
+        if (debugInput) Debug.Log($"[Overcooked][{name}] PICKUP fired");
+        OnPickupPressed();
+    }
+
+    public void OnAction(InputValue value)
+    {
+        if (!value.isPressed) return;
+        if (debugInput) Debug.Log($"[Overcooked][{name}] ACTION fired");
+        OnActionPressed();
+    }
 
     private void Start()
     {
@@ -177,23 +220,13 @@ public class OvercookedCharacter : MonoBehaviour
             holdAnchor = anchor.transform;
         }
 
-        if (debugInput) LogInputSetup();
-    }
-
-    private void LogInputSetup()
-    {
-        string[] joys = Input.GetJoystickNames();
-        var sb = new System.Text.StringBuilder();
-        sb.Append($"[Overcooked][{name}] playerIndex={playerIndex}. Joysticks detected: {joys.Length}");
-        for (int i = 0; i < joys.Length; i++)
+        if (debugInput)
         {
-            sb.Append($"\n  slot {i + 1}: \"{joys[i]}\"" + (string.IsNullOrEmpty(joys[i]) ? "  <-- EMPTY = unplugged/ghost slot" : ""));
+            string dev = playerInput != null && playerInput.devices.Count > 0
+                ? playerInput.devices[0].displayName + " (" + playerInput.devices[0].deviceId + ")"
+                : "<none>";
+            Debug.Log($"[Overcooked][{name}] player {playerInput?.playerIndex} paired to {dev}");
         }
-        KeyCode pBtn = JoystickButtonForPlayer(pickupGamepadButton);
-        KeyCode aBtn = JoystickButtonForPlayer(actionGamepadButton);
-        sb.Append($"\n  listening for pickup={pBtn}  action={aBtn}");
-        sb.Append($"\n  axes: \"{horizontalAxis}\" / \"{verticalAxis}\"");
-        Debug.Log(sb.ToString());
     }
 
     private void Update()
@@ -208,73 +241,20 @@ public class OvercookedCharacter : MonoBehaviour
         UpdateFacing();
         UpdateKnifeEquip();
         TickChop();
-
-        if (debugInput) DebugScanJoystickButtons();
-
-        KeyCode pBtn = JoystickButtonForPlayer(pickupGamepadButton);
-        KeyCode aBtn = JoystickButtonForPlayer(actionGamepadButton);
-
-        if (Input.GetKeyDown(pickupKey) || Input.GetKeyDown(pBtn))
-        {
-            if (debugInput) Debug.Log($"[Overcooked][{name}] PICKUP fired (listening for {pBtn})");
-            OnPickupPressed();
-        }
-
-        if (Input.GetKeyDown(actionKey) || Input.GetKeyDown(aBtn))
-        {
-            if (debugInput) Debug.Log($"[Overcooked][{name}] ACTION fired (listening for {aBtn})");
-            OnActionPressed();
-        }
-    }
-
-    // Scans every JoystickN_ButtonM and logs presses so you can identify which slot a controller is in.
-    private void DebugScanJoystickButtons()
-    {
-        for (int slot = 1; slot <= 8; slot++)
-        {
-            for (int btn = 0; btn < 20; btn++)
-            {
-                KeyCode k = (KeyCode)((int)KeyCode.JoystickButton0 + slot * 20 + btn);
-                if (Input.GetKeyDown(k))
-                    Debug.Log($"[Overcooked][{name}] saw {k}  (slot {slot}, button {btn})  myPlayerIndex={playerIndex}");
-            }
-        }
-        // Also log axis values when non-zero so you can see if the per-player axis is actually firing.
-        // Lowered threshold to catch tiny stick drift / partial pushes.
-        float h = 0f, v = 0f;
-        try { h = Input.GetAxisRaw(horizontalAxis); }
-        catch (System.Exception e) { Debug.LogError($"[Overcooked][{name}] horizontalAxis \"{horizontalAxis}\" failed: {e.Message}"); }
-        try { v = Input.GetAxisRaw(verticalAxis); }
-        catch (System.Exception e) { Debug.LogError($"[Overcooked][{name}] verticalAxis \"{verticalAxis}\" failed: {e.Message}"); }
-        if (Mathf.Abs(h) > 0.05f || Mathf.Abs(v) > 0.05f)
-            Debug.Log($"[Overcooked][{name}] axis \"{horizontalAxis}\"={h:0.00} \"{verticalAxis}\"={v:0.00}");
-    }
-
-    // Remaps a generic JoystickButtonN code (any joystick) to JoystickK_ButtonN for this player's slot.
-    // KeyCode layout: JoystickButton0..19 = "any joystick", Joystick1Button0..19, Joystick2Button0..19, ... up to Joystick8.
-    private KeyCode JoystickButtonForPlayer(KeyCode anyJoystickButton)
-    {
-        if (playerIndex <= 0) return anyJoystickButton;
-        int buttonOffset = (int)anyJoystickButton - (int)KeyCode.JoystickButton0;
-        if (buttonOffset < 0 || buttonOffset > 19) return anyJoystickButton;
-        int slot = Mathf.Clamp(playerIndex, 1, 8);
-        // Joystick1Button0 == JoystickButton0 + 20, Joystick2Button0 == + 40, etc.
-        return (KeyCode)((int)KeyCode.JoystickButton0 + slot * 20 + buttonOffset);
     }
 
     private Vector3 ReadMoveInput()
     {
-        float h = Input.GetAxisRaw(horizontalAxis);
-        float v = Input.GetAxisRaw(verticalAxis);
-        Vector3 dir = new Vector3(h, 0f, v);
+        Vector3 dir = new Vector3(moveInput.x, 0f, moveInput.y);
 
-        // Radial deadzone: ignore tiny stick drift, then rescale so motion just outside
-        // the deadzone starts at 0 (no jump) instead of at the deadzone value.
+        // Extra radial deadzone on top of the InputAction's built-in stick deadzone.
         float mag = dir.magnitude;
         if (mag < stickDeadzone) return Vector3.zero;
-        float rescaled = (mag - stickDeadzone) / (1f - stickDeadzone);
-        dir = dir / mag * Mathf.Clamp01(rescaled);
-
+        if (stickDeadzone > 0f)
+        {
+            float rescaled = (mag - stickDeadzone) / (1f - stickDeadzone);
+            dir = dir / mag * Mathf.Clamp01(rescaled);
+        }
         return dir;
     }
 
