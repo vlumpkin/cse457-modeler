@@ -34,11 +34,22 @@ public class OvercookedCharacter : MonoBehaviour
     public string leftArmContainerName = "left_arm_container";
     public string rightArmContainerName = "right_arm_container";
 
-    [Header("Input (keyboard)")]
+    [Header("Input")]
+    [Tooltip("1-based controller slot. Player 1 reads JoystickN buttons and the axes below; player 2 reads the next joystick, etc. Set to 0 to listen to ANY joystick (legacy behavior).")]
+    [Range(0, 8)] public int playerIndex = 1;
     public KeyCode pickupKey = KeyCode.Space;
     public KeyCode actionKey = KeyCode.X;
-    public KeyCode pickupGamepad = KeyCode.JoystickButton0; // Xbox A
-    public KeyCode actionGamepad = KeyCode.JoystickButton2; // Xbox X
+    [Tooltip("Xbox A on this player's joystick (button 0).")]
+    public KeyCode pickupGamepadButton = KeyCode.JoystickButton0;
+    [Tooltip("Xbox X on this player's joystick (button 2).")]
+    public KeyCode actionGamepadButton = KeyCode.JoystickButton2;
+    [Tooltip("Input Manager axis name for horizontal movement. Defaults to the built-in 'Horizontal'. For multiplayer, set per-player axes like 'Horizontal_P1', 'Horizontal_P2' and configure them in Project Settings > Input Manager.")]
+    public string horizontalAxis = "Horizontal";
+    public string verticalAxis = "Vertical";
+    [Tooltip("Radial deadzone applied to the stick vector (h,v). Stick magnitudes below this are treated as zero. 0.20-0.30 is typical for worn Xbox sticks.")]
+    [Range(0f, 0.5f)] public float stickDeadzone = 0.25f;
+    [Tooltip("Log connected joysticks at startup and any joystick button presses this character sees. Useful for figuring out which slot a controller is mapped to.")]
+    public bool debugInput = false;
 
     [Header("Interaction")]
     [Tooltip("Where held items parent to. Auto-created in front of torso if null.")]
@@ -60,6 +71,20 @@ public class OvercookedCharacter : MonoBehaviour
     public float highlightYOffset = 0.01f;
     [Tooltip("Optional material. If left null, an unlit transparent material is generated at runtime.")]
     public Material highlightMaterial;
+
+    [Header("Cutting")]
+    [Tooltip("Seconds between chops. Each X press triggers one chop animation lasting this long.")]
+    public float cutCooldown = 0.25f;
+    [Tooltip("Right-arm X-axis euler at the top of the chop (knife raised).")]
+    public float chopMinX = -25f;
+    [Tooltip("Right-arm X-axis euler at the bottom of the chop (knife down).")]
+    public float chopMaxX = 60f;
+    [Tooltip("Optional anchor inside the right arm where the knife is parented. Falls back to right_arm_container if null.")]
+    public Transform rightHandAnchor;
+    [Tooltip("Local position of the knife relative to the hand anchor.")]
+    public Vector3 knifeGripLocalPos = Vector3.zero;
+    [Tooltip("Local euler rotation of the knife relative to the hand anchor.")]
+    public Vector3 knifeGripLocalEuler = Vector3.zero;
 
     [Header("Debug ray")]
     public bool drawDebugRay = true;
@@ -85,6 +110,19 @@ public class OvercookedCharacter : MonoBehaviour
     private GameObject highlightQuad;
     private Transform highlightTf;
     private MeshRenderer highlightRenderer;
+
+    private bool hasKnife;
+    private bool isChopping;
+    private float chopTimer;
+    private Station knifeStation;
+    private Transform borrowedKnife;
+    private Transform knifeOriginalParent;
+    private Vector3 knifeOriginalLocalPos;
+    private Quaternion knifeOriginalLocalRot;
+    private KnifeGrip currentGrip;
+
+    public bool HasKnife => hasKnife;
+    public bool IsChopping => isChopping;
 
     private float swayPhase;
     private float swingPhase;
@@ -138,6 +176,24 @@ public class OvercookedCharacter : MonoBehaviour
             anchor.transform.localRotation = Quaternion.identity;
             holdAnchor = anchor.transform;
         }
+
+        if (debugInput) LogInputSetup();
+    }
+
+    private void LogInputSetup()
+    {
+        string[] joys = Input.GetJoystickNames();
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"[Overcooked][{name}] playerIndex={playerIndex}. Joysticks detected: {joys.Length}");
+        for (int i = 0; i < joys.Length; i++)
+        {
+            sb.Append($"\n  slot {i + 1}: \"{joys[i]}\"" + (string.IsNullOrEmpty(joys[i]) ? "  <-- EMPTY = unplugged/ghost slot" : ""));
+        }
+        KeyCode pBtn = JoystickButtonForPlayer(pickupGamepadButton);
+        KeyCode aBtn = JoystickButtonForPlayer(actionGamepadButton);
+        sb.Append($"\n  listening for pickup={pBtn}  action={aBtn}");
+        sb.Append($"\n  axes: \"{horizontalAxis}\" / \"{verticalAxis}\"");
+        Debug.Log(sb.ToString());
     }
 
     private void Update()
@@ -150,20 +206,75 @@ public class OvercookedCharacter : MonoBehaviour
         ApplyArmPose(moving);
 
         UpdateFacing();
+        UpdateKnifeEquip();
+        TickChop();
 
-        if (Input.GetKeyDown(pickupKey) || Input.GetKeyDown(pickupGamepad))
+        if (debugInput) DebugScanJoystickButtons();
+
+        KeyCode pBtn = JoystickButtonForPlayer(pickupGamepadButton);
+        KeyCode aBtn = JoystickButtonForPlayer(actionGamepadButton);
+
+        if (Input.GetKeyDown(pickupKey) || Input.GetKeyDown(pBtn))
+        {
+            if (debugInput) Debug.Log($"[Overcooked][{name}] PICKUP fired (listening for {pBtn})");
             OnPickupPressed();
+        }
 
-        if (Input.GetKeyDown(actionKey) || Input.GetKeyDown(actionGamepad))
+        if (Input.GetKeyDown(actionKey) || Input.GetKeyDown(aBtn))
+        {
+            if (debugInput) Debug.Log($"[Overcooked][{name}] ACTION fired (listening for {aBtn})");
             OnActionPressed();
+        }
+    }
+
+    // Scans every JoystickN_ButtonM and logs presses so you can identify which slot a controller is in.
+    private void DebugScanJoystickButtons()
+    {
+        for (int slot = 1; slot <= 8; slot++)
+        {
+            for (int btn = 0; btn < 20; btn++)
+            {
+                KeyCode k = (KeyCode)((int)KeyCode.JoystickButton0 + slot * 20 + btn);
+                if (Input.GetKeyDown(k))
+                    Debug.Log($"[Overcooked][{name}] saw {k}  (slot {slot}, button {btn})  myPlayerIndex={playerIndex}");
+            }
+        }
+        // Also log axis values when non-zero so you can see if the per-player axis is actually firing.
+        // Lowered threshold to catch tiny stick drift / partial pushes.
+        float h = 0f, v = 0f;
+        try { h = Input.GetAxisRaw(horizontalAxis); }
+        catch (System.Exception e) { Debug.LogError($"[Overcooked][{name}] horizontalAxis \"{horizontalAxis}\" failed: {e.Message}"); }
+        try { v = Input.GetAxisRaw(verticalAxis); }
+        catch (System.Exception e) { Debug.LogError($"[Overcooked][{name}] verticalAxis \"{verticalAxis}\" failed: {e.Message}"); }
+        if (Mathf.Abs(h) > 0.05f || Mathf.Abs(v) > 0.05f)
+            Debug.Log($"[Overcooked][{name}] axis \"{horizontalAxis}\"={h:0.00} \"{verticalAxis}\"={v:0.00}");
+    }
+
+    // Remaps a generic JoystickButtonN code (any joystick) to JoystickK_ButtonN for this player's slot.
+    // KeyCode layout: JoystickButton0..19 = "any joystick", Joystick1Button0..19, Joystick2Button0..19, ... up to Joystick8.
+    private KeyCode JoystickButtonForPlayer(KeyCode anyJoystickButton)
+    {
+        if (playerIndex <= 0) return anyJoystickButton;
+        int buttonOffset = (int)anyJoystickButton - (int)KeyCode.JoystickButton0;
+        if (buttonOffset < 0 || buttonOffset > 19) return anyJoystickButton;
+        int slot = Mathf.Clamp(playerIndex, 1, 8);
+        // Joystick1Button0 == JoystickButton0 + 20, Joystick2Button0 == + 40, etc.
+        return (KeyCode)((int)KeyCode.JoystickButton0 + slot * 20 + buttonOffset);
     }
 
     private Vector3 ReadMoveInput()
     {
-        float h = Input.GetAxisRaw("Horizontal");
-        float v = Input.GetAxisRaw("Vertical");
+        float h = Input.GetAxisRaw(horizontalAxis);
+        float v = Input.GetAxisRaw(verticalAxis);
         Vector3 dir = new Vector3(h, 0f, v);
-        if (dir.sqrMagnitude > 1f) dir.Normalize();
+
+        // Radial deadzone: ignore tiny stick drift, then rescale so motion just outside
+        // the deadzone starts at 0 (no jump) instead of at the deadzone value.
+        float mag = dir.magnitude;
+        if (mag < stickDeadzone) return Vector3.zero;
+        float rescaled = (mag - stickDeadzone) / (1f - stickDeadzone);
+        dir = dir / mag * Mathf.Clamp01(rescaled);
+
         return dir;
     }
 
@@ -211,6 +322,12 @@ public class OvercookedCharacter : MonoBehaviour
 
     private void ApplyArmPose(bool moving)
     {
+        if (hasKnife)
+        {
+            ApplyKnifePose();
+            return;
+        }
+
         if (IsHolding)
         {
             ApplyCarryPose();
@@ -305,6 +422,9 @@ public class OvercookedCharacter : MonoBehaviour
 
     private void OnPickupPressed()
     {
+        if (isChopping) return;
+        if (hasKnife) UnequipKnife();
+
         Station station = FindFacingStation();
         if (station == null)
         {
@@ -342,9 +462,166 @@ public class OvercookedCharacter : MonoBehaviour
 
     private void OnActionPressed()
     {
-        // Stub — context action (cut/wash/extinguish) lands in step 3.
-        Station station = FindFacingStation();
-        Debug.Log($"[Overcooked] Action pressed (facing: {(station ? station.kind.ToString() : "none")}, holding: {(IsHolding ? heldItem.kind.ToString() : "nothing")})");
+        if (!hasKnife) return;
+        if (isChopping) return;
+
+        // Begin a chop cycle. Animation runs for cutCooldown; the cut lands at the bottom of the chop.
+        isChopping = true;
+        chopTimer = 0f;
+
+        if (knifeStation != null && knifeStation.current != null)
+        {
+            bool finished = knifeStation.current.RegisterCut();
+            if (finished)
+                Debug.Log($"[Overcooked] {knifeStation.current.name} is now Cut");
+        }
+    }
+
+    private void UpdateKnifeEquip()
+    {
+        bool wantKnife = !IsHolding
+                         && facingStation != null
+                         && facingStation.kind == StationKind.CuttingBoard
+                         && facingStation.knife != null;
+
+        if (wantKnife && !hasKnife)
+        {
+            EquipKnife(facingStation);
+        }
+        else if (hasKnife && !isChopping)
+        {
+            // Return the knife if we're no longer at the same cutting board (or we picked something up).
+            if (facingStation != knifeStation || IsHolding || !wantKnife)
+                UnequipKnife();
+        }
+    }
+
+    private void EquipKnife(Station station)
+    {
+        Transform handAnchor = rightHandAnchor != null ? rightHandAnchor : rightArm;
+        if (handAnchor == null) return;
+
+        knifeStation = station;
+        borrowedKnife = station.knife;
+        knifeOriginalParent = borrowedKnife.parent;
+        knifeOriginalLocalPos = borrowedKnife.localPosition;
+        knifeOriginalLocalRot = borrowedKnife.localRotation;
+
+        currentGrip = borrowedKnife.GetComponent<KnifeGrip>();
+        Vector3 gripPos = currentGrip != null ? currentGrip.localPos : knifeGripLocalPos;
+        Vector3 gripEuler = currentGrip != null ? currentGrip.localEuler : knifeGripLocalEuler;
+
+        borrowedKnife.SetParent(handAnchor, true);
+        borrowedKnife.localPosition = gripPos;
+        borrowedKnife.localRotation = Quaternion.Euler(gripEuler);
+
+        hasKnife = true;
+    }
+
+    private void UnequipKnife()
+    {
+        if (borrowedKnife != null)
+        {
+            borrowedKnife.SetParent(knifeOriginalParent, true);
+            borrowedKnife.localPosition = knifeOriginalLocalPos;
+            borrowedKnife.localRotation = knifeOriginalLocalRot;
+        }
+        hasKnife = false;
+        isChopping = false;
+        knifeStation = null;
+        borrowedKnife = null;
+        knifeOriginalParent = null;
+        currentGrip = null;
+    }
+
+    private float EffectiveChopDuration()
+        => (currentGrip != null && currentGrip.overrideChop) ? Mathf.Max(0.01f, currentGrip.chopDuration) : cutCooldown;
+
+    private float ChopWave(float t)
+    {
+        // Default symmetric sine when no grip override.
+        if (currentGrip == null || !currentGrip.overrideChop)
+            return Mathf.Sin(t * Mathf.PI);
+
+        float down = Mathf.Clamp(currentGrip.downFraction, 0.01f, 0.99f);
+        float hold = Mathf.Clamp(currentGrip.holdFraction, 0f, 1f - down);
+        float up = Mathf.Max(0.01f, 1f - down - hold);
+
+        if (t < down)
+        {
+            float u = t / down;
+            return Mathf.Pow(u, Mathf.Max(0.01f, currentGrip.downEasePower));
+        }
+        if (t < down + hold)
+        {
+            return 1f;
+        }
+        float r = (t - down - hold) / up;
+        return 1f - Mathf.Pow(r, Mathf.Max(0.01f, currentGrip.upEasePower));
+    }
+
+    private void TickChop()
+    {
+        if (!isChopping) return;
+        chopTimer += Time.deltaTime;
+        if (chopTimer >= EffectiveChopDuration()) isChopping = false;
+    }
+
+    private void ApplyKnifePose()
+    {
+        // Re-apply grip pos/rot each frame so Inspector tweaks show up live.
+        // Skip when the grip is in tuneMode — lets the user drag the knife in the Scene view.
+        if (borrowedKnife != null && (currentGrip == null || !currentGrip.tuneMode))
+        {
+            Vector3 gripPos = currentGrip != null ? currentGrip.localPos : knifeGripLocalPos;
+            Vector3 gripEuler = currentGrip != null ? currentGrip.localEuler : knifeGripLocalEuler;
+            borrowedKnife.localPosition = gripPos;
+            borrowedKnife.localRotation = Quaternion.Euler(gripEuler);
+        }
+
+        // Left arm stays at rest.
+        if (leftArm != null)
+        {
+            leftArm.localPosition = leftArmRestPos;
+            leftArm.localRotation = leftArmRestRot;
+        }
+
+        // Choose rest/slice eulers from KnifeGrip if it overrides; else fall back to character chopMinX/chopMaxX.
+        Vector3 restEuler;
+        Vector3 sliceEuler;
+        if (currentGrip != null && currentGrip.overrideChop)
+        {
+            restEuler = currentGrip.restEuler;
+            sliceEuler = currentGrip.sliceEuler;
+        }
+        else
+        {
+            restEuler = new Vector3(chopMinX, 0f, 0f);
+            sliceEuler = new Vector3(chopMaxX, 0f, 0f);
+        }
+
+        Vector3 angle = restEuler;
+        float duration = EffectiveChopDuration();
+        float wave = 0f;
+        if (isChopping && duration > 0f)
+        {
+            float t = Mathf.Clamp01(chopTimer / duration);
+            wave = ChopWave(t);
+            angle = Vector3.Lerp(restEuler, sliceEuler, wave);
+        }
+
+        // Right arm position: KnifeGrip can override rest/slice positions; otherwise stay at scene-edit rest.
+        Vector3 armPos = rightArmRestPos;
+        if (currentGrip != null && currentGrip.overrideArmPosition)
+        {
+            armPos = Vector3.Lerp(currentGrip.restArmPos, currentGrip.sliceArmPos, wave);
+        }
+
+        if (rightArm != null)
+        {
+            rightArm.localPosition = armPos;
+            rightArm.localRotation = rightArmRestRot * Quaternion.Euler(angle);
+        }
     }
 
     private Station FindFacingStation() => facingStation;

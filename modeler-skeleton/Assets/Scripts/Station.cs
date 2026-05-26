@@ -12,6 +12,9 @@ public class Station : MonoBehaviour
     [Tooltip("Item currently sitting on the station (auto-detected on Start if left null and a Pickupable is a child).")]
     public Pickupable current;
 
+    [Tooltip("Knife transform (for CuttingBoard kind). Borrowed by the character while cutting.")]
+    public Transform knife;
+
     private void Start()
     {
         if (placementAnchor == null) placementAnchor = transform;

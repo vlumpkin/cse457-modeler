@@ -13,7 +13,35 @@ public class Pickupable : MonoBehaviour
     [Tooltip("Disable colliders while held so the character capsule doesn't fight the item.")]
     public bool disableColliderWhileHeld = true;
 
+    [Header("Cutting (only relevant for Food)")]
+    public int cutsRequired = 5;
+    [Tooltip("Read-only-ish — incremented by OvercookedCharacter when a chop lands.")]
+    public int cutProgress = 0;
+    [Tooltip("Auto-create a 3D progress meter above this item while it's being cut.")]
+    public bool showCutMeter = true;
+    [Tooltip("Vertical offset (world units) above the item's pivot to place the meter.")]
+    public float cutMeterYOffset = 1.0f;
+
     private Collider[] cachedColliders;
+    private CutProgressMeter cutMeter;
+
+    public bool RegisterCut()
+    {
+        if (kind != PickupableKind.Food || foodState != FoodState.Raw) return false;
+        cutProgress++;
+        if (cutProgress >= cutsRequired)
+        {
+            foodState = FoodState.Cut;
+            if (cutMeter != null) cutMeter.Hide();
+            return true; // finished
+        }
+        if (showCutMeter)
+        {
+            if (cutMeter == null) cutMeter = CutProgressMeter.AttachTo(this);
+            cutMeter.SetProgress((float)cutProgress / cutsRequired);
+        }
+        return false;
+    }
 
     public void OnPickedUp(Transform anchor)
     {
