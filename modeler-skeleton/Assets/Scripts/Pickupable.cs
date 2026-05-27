@@ -2,13 +2,18 @@ using UnityEngine;
 
 public enum PickupableKind { Food, Plate, Pot }
 public enum FoodState { Raw, Cut }
+public enum VegetableType { Carrot, Onion }
 public enum PlateState { Clean, Dirty }
+public enum PlateContents { Empty, Soup }
 
 public class Pickupable : MonoBehaviour
 {
     public PickupableKind kind = PickupableKind.Food;
     public FoodState foodState = FoodState.Raw;
+    [Tooltip("Only meaningful when kind == Food.")]
+    public VegetableType vegetableType = VegetableType.Carrot;
     public PlateState plateState = PlateState.Clean;
+    public PlateContents plateContents = PlateContents.Empty;
 
     [Tooltip("Disable colliders while held so the character capsule doesn't fight the item.")]
     public bool disableColliderWhileHeld = true;

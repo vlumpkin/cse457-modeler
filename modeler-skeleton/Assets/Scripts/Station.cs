@@ -1,6 +1,6 @@
 using UnityEngine;
 
-public enum StationKind { Counter, CuttingBoard, Sink, FireExtinguisher }
+public enum StationKind { Counter, CuttingBoard, Sink, FireExtinguisher, Burner }
 
 public class Station : MonoBehaviour
 {
@@ -38,5 +38,12 @@ public class Station : MonoBehaviour
         Pickupable p = current;
         current = null;
         return p;
+    }
+
+    private void Update()
+    {
+        if (kind != StationKind.Burner || current == null) return;
+        PotContents pot = current.GetComponentInChildren<PotContents>();
+        if (pot != null) pot.Tick(Time.deltaTime);
     }
 }

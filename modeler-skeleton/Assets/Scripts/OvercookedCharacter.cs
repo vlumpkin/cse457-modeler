@@ -414,6 +414,10 @@ public class OvercookedCharacter : MonoBehaviour
 
         if (IsHolding)
         {
+            if (TryDepositVegetable(station)) return;
+            if (TryPlateFromBurner(station)) return;
+            if (TryPlateFromHeldPot(station)) return;
+
             if (station.TryPlace(heldItem))
             {
                 Debug.Log($"[Overcooked] Placed {heldItem.kind} on {station.name}");
@@ -438,6 +442,77 @@ public class OvercookedCharacter : MonoBehaviour
                 Debug.Log($"[Overcooked] {station.name} is empty");
             }
         }
+    }
+
+    private bool TryDepositVegetable(Station station)
+    {
+        if (station.kind != StationKind.Burner)
+        { Debug.Log($"[Deposit] reject: station kind is {station.kind}, need Burner"); return false; }
+        if (station.current == null)
+        { Debug.Log($"[Deposit] reject: station.current is null"); return false; }
+        if (station.current.kind != PickupableKind.Pot)
+        { Debug.Log($"[Deposit] reject: station.current kind is {station.current.kind}, need Pot"); return false; }
+        if (heldItem.kind != PickupableKind.Food)
+        { Debug.Log($"[Deposit] reject: held kind is {heldItem.kind}, need Food"); return false; }
+        if (heldItem.foodState != FoodState.Cut)
+        { Debug.Log($"[Deposit] reject: held foodState is {heldItem.foodState}, need Cut"); return false; }
+
+        PotContents pot = station.current.GetComponentInChildren<PotContents>();
+        if (pot == null)
+        { Debug.Log($"[Deposit] reject: {station.current.name} has no PotContents component"); return false; }
+        if (!pot.TryAddVegetable(heldItem.vegetableType))
+        { Debug.Log($"[Deposit] reject: TryAddVegetable failed (vegCount={pot.vegCount}, onFire={pot.onFire})"); return false; }
+
+        Debug.Log($"[Overcooked] Deposited {heldItem.vegetableType} into pot ({pot.vegCount}/{PotContents.MaxVegetables})");
+        Destroy(heldItem.gameObject);
+        heldItem = null;
+        return true;
+    }
+
+    private bool TryPlateFromBurner(Station station)
+    {
+        if (station.kind != StationKind.Burner)
+        { Debug.Log($"[PlateFromBurner] reject: station kind is {station.kind}"); return false; }
+        if (station.current == null || station.current.kind != PickupableKind.Pot)
+        { Debug.Log($"[PlateFromBurner] reject: burner has no Pot (current={(station.current!=null?station.current.kind.ToString():"null")})"); return false; }
+        if (heldItem.kind != PickupableKind.Plate)
+        { Debug.Log($"[PlateFromBurner] reject: held kind is {heldItem.kind}, need Plate"); return false; }
+        if (heldItem.plateState != PlateState.Clean || heldItem.plateContents != PlateContents.Empty)
+        { Debug.Log($"[PlateFromBurner] reject: plate is {heldItem.plateState}/{heldItem.plateContents}, need Clean/Empty"); return false; }
+
+        PotContents pot = station.current.GetComponentInChildren<PotContents>();
+        if (pot == null)
+        { Debug.Log($"[PlateFromBurner] reject: pot has no PotContents"); return false; }
+        if (!pot.IsFullyCooked)
+        { Debug.Log($"[PlateFromBurner] reject: pot not fully cooked (veg={pot.vegCount}, cook={pot.cookSeconds:F1}/{pot.TotalCookTime:F1})"); return false; }
+
+        pot.Empty();
+        heldItem.plateContents = PlateContents.Soup;
+        Debug.Log($"[Overcooked] Plated soup from {station.name}");
+        return true;
+    }
+
+    private bool TryPlateFromHeldPot(Station station)
+    {
+        if (heldItem.kind != PickupableKind.Pot)
+        { Debug.Log($"[PlateFromHeldPot] reject: held kind is {heldItem.kind}, need Pot"); return false; }
+        if (station.current == null || station.current.kind != PickupableKind.Plate)
+        { Debug.Log($"[PlateFromHeldPot] reject: station has no Plate (current={(station.current!=null?station.current.kind.ToString():"null")})"); return false; }
+
+        Pickupable plate = station.current;
+        if (plate.plateState != PlateState.Clean || plate.plateContents != PlateContents.Empty)
+        { Debug.Log($"[PlateFromHeldPot] reject: plate is {plate.plateState}/{plate.plateContents}"); return false; }
+
+        PotContents pot = heldItem.GetComponentInChildren<PotContents>();
+        if (pot == null)
+        { Debug.Log($"[PlateFromHeldPot] reject: held pot has no PotContents"); return false; }
+        if (!pot.IsFullyCooked)
+        { Debug.Log($"[PlateFromHeldPot] reject: pot not fully cooked (veg={pot.vegCount}, cook={pot.cookSeconds:F1}/{pot.TotalCookTime:F1})"); return false; }
+
+        pot.Empty();
+        plate.plateContents = PlateContents.Soup;
+        Debug.Log($"[Overcooked] Plated soup onto {plate.name}");
+        return true;
     }
 
     private void OnActionPressed()
