@@ -33,6 +33,18 @@ public class PotContents : MonoBehaviour
     public bool IsFull => vegCount >= MaxVegetables;
     public bool IsFullyCooked => vegCount == MaxVegetables && cookSeconds >= TotalCookTime;
 
+    // True only when fully cooked, not on fire, and all 3 vegetables are the same type.
+    public bool TryGetSoupType(out VegetableType type)
+    {
+        type = default;
+        if (!IsFullyCooked || onFire) return false;
+        foreach (var kv in perType)
+        {
+            if (kv.Value == MaxVegetables) { type = kv.Key; return true; }
+        }
+        return false;
+    }
+
     private void Awake()
     {
         RefreshVisuals();

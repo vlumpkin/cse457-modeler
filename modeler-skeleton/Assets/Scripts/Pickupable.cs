@@ -8,17 +8,17 @@ public enum PlateContents { Empty, Soup }
 
 public class Pickupable : MonoBehaviour
 {
+    [Header("Kind")]
     public PickupableKind kind = PickupableKind.Food;
-    public FoodState foodState = FoodState.Raw;
-    [Tooltip("Only meaningful when kind == Food.")]
-    public VegetableType vegetableType = VegetableType.Carrot;
-    public PlateState plateState = PlateState.Clean;
-    public PlateContents plateContents = PlateContents.Empty;
 
+    [Header("General")]
     [Tooltip("Disable colliders while held so the character capsule doesn't fight the item.")]
     public bool disableColliderWhileHeld = true;
 
-    [Header("Cutting (only relevant for Food)")]
+    [Header("Food (only relevant when Kind == Food)")]
+    public FoodState foodState = FoodState.Raw;
+    public VegetableType vegetableType = VegetableType.Carrot;
+    [Tooltip("Number of chops required to transition Raw → Cut.")]
     public int cutsRequired = 5;
     [Tooltip("Read-only-ish — incremented by OvercookedCharacter when a chop lands.")]
     public int cutProgress = 0;
@@ -26,6 +26,16 @@ public class Pickupable : MonoBehaviour
     public bool showCutMeter = true;
     [Tooltip("Vertical offset (world units) above the item's pivot to place the meter.")]
     public float cutMeterYOffset = 1.0f;
+
+    [Header("Plate (only relevant when Kind == Plate)")]
+    public PlateState plateState = PlateState.Clean;
+    public PlateContents plateContents = PlateContents.Empty;
+    [Tooltip("Only meaningful when plateContents == Soup.")]
+    public VegetableType soupType = VegetableType.Carrot;
+
+    [Header("Pot (only relevant when Kind == Pot)")]
+    [Tooltip("Cooking state lives on the PotContents component attached to this object.")]
+    [TextArea] public string potNote = "See PotContents component for vegetable count, cook timer, and visuals.";
 
     private Collider[] cachedColliders;
     private CutProgressMeter cutMeter;
