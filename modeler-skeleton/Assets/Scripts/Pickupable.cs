@@ -18,7 +18,10 @@ public class Pickupable : MonoBehaviour
     [Header("Food (only relevant when Kind == Food)")]
     public FoodState foodState = FoodState.Raw;
     public VegetableType vegetableType = VegetableType.Carrot;
-    [Tooltip("Number of chops required to transition Raw → Cut.")]
+    [Tooltip("Ordered visual stages: index 0 = whole, last index = fully cut. " +
+             "Each chop advances to the next entry. If empty, falls back to cutsRequired with no visual swap.")]
+    public GameObject[] cutStageVisuals;
+    [Tooltip("Used only when cutStageVisuals is empty. Otherwise derived from the array length.")]
     public int cutsRequired = 5;
     [Tooltip("Read-only-ish — incremented by OvercookedCharacter when a chop lands.")]
     public int cutProgress = 0;
@@ -26,6 +29,10 @@ public class Pickupable : MonoBehaviour
     public bool showCutMeter = true;
     [Tooltip("Vertical offset (world units) above the item's pivot to place the meter.")]
     public float cutMeterYOffset = 1.0f;
+
+    public int CutsRequired => (cutStageVisuals != null && cutStageVisuals.Length >= 2)
+        ? cutStageVisuals.Length - 1
+        : cutsRequired;
 
     [Header("Plate (only relevant when Kind == Plate)")]
     public PlateState plateState = PlateState.Clean;
@@ -40,11 +47,18 @@ public class Pickupable : MonoBehaviour
     private Collider[] cachedColliders;
     private CutProgressMeter cutMeter;
 
+    void Awake()
+    {
+        if (kind == PickupableKind.Food) ApplyStageVisual();
+    }
+
     public bool RegisterCut()
     {
         if (kind != PickupableKind.Food || foodState != FoodState.Raw) return false;
         cutProgress++;
-        if (cutProgress >= cutsRequired)
+        int needed = CutsRequired;
+        ApplyStageVisual();
+        if (cutProgress >= needed)
         {
             foodState = FoodState.Cut;
             if (cutMeter != null) cutMeter.Hide();
@@ -53,9 +67,20 @@ public class Pickupable : MonoBehaviour
         if (showCutMeter)
         {
             if (cutMeter == null) cutMeter = CutProgressMeter.AttachTo(this);
-            cutMeter.SetProgress((float)cutProgress / cutsRequired);
+            cutMeter.SetProgress((float)cutProgress / needed);
         }
         return false;
+    }
+
+    private void ApplyStageVisual()
+    {
+        if (cutStageVisuals == null || cutStageVisuals.Length == 0) return;
+        int active = Mathf.Clamp(cutProgress, 0, cutStageVisuals.Length - 1);
+        for (int i = 0; i < cutStageVisuals.Length; i++)
+        {
+            var go = cutStageVisuals[i];
+            if (go != null && go.activeSelf != (i == active)) go.SetActive(i == active);
+        }
     }
 
     public void OnPickedUp(Transform anchor)

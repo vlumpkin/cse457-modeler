@@ -20,11 +20,14 @@ public class PotContents : MonoBehaviour
     [Header("Per-type visuals (toggled while that vegetable is present)")]
     public List<VegetableVisual> visuals = new List<VegetableVisual>();
 
+    [Tooltip("Child shown instead of the per-type visuals when the pot is burned.")]
+    public GameObject burnedVisual;
+
     [Header("State (read-only-ish)")]
     public int vegCount;
     public float cookSeconds;
     public float overcookSeconds;
-    public bool onFire;
+    public bool burned;
 
     // Per-type counts, indexed by (int)VegetableType.
     private readonly Dictionary<VegetableType, int> perType = new Dictionary<VegetableType, int>();
@@ -37,7 +40,7 @@ public class PotContents : MonoBehaviour
     public bool TryGetSoupType(out VegetableType type)
     {
         type = default;
-        if (!IsFullyCooked || onFire) return false;
+        if (!IsFullyCooked || burned) return false;
         foreach (var kv in perType)
         {
             if (kv.Value == MaxVegetables) { type = kv.Key; return true; }
@@ -52,7 +55,7 @@ public class PotContents : MonoBehaviour
 
     public bool TryAddVegetable(VegetableType type)
     {
-        if (IsFull || onFire) return false;
+        if (IsFull || burned) return false;
         vegCount++;
         perType.TryGetValue(type, out int n);
         perType[type] = n + 1;
@@ -66,7 +69,7 @@ public class PotContents : MonoBehaviour
         vegCount = 0;
         cookSeconds = 0f;
         overcookSeconds = 0f;
-        onFire = false;
+        burned = false;
         perType.Clear();
         RefreshVisuals();
     }
@@ -79,7 +82,7 @@ public class PotContents : MonoBehaviour
 
     public void Tick(float dt)
     {
-        if (vegCount == 0 || onFire) return;
+        if (vegCount == 0 || burned) return;
 
         float total = TotalCookTime;
         if (cookSeconds < total)
@@ -89,7 +92,11 @@ public class PotContents : MonoBehaviour
         }
 
         overcookSeconds += dt;
-        if (overcookSeconds >= OvercookSecondsUntilFire) onFire = true;
+        if (overcookSeconds >= OvercookSecondsUntilFire && !burned)
+        {
+            burned = true;
+            RefreshVisuals();
+        }
     }
 
     private void RefreshVisuals()
@@ -98,7 +105,8 @@ public class PotContents : MonoBehaviour
         {
             var v = visuals[i];
             if (v.visual == null) continue;
-            v.visual.SetActive(CountOf(v.type) > 0);
+            v.visual.SetActive(!burned && CountOf(v.type) > 0);
         }
+        if (burnedVisual != null) burnedVisual.SetActive(burned);
     }
 }

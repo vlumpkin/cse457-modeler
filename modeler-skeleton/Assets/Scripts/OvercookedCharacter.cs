@@ -37,6 +37,17 @@ public class OvercookedCharacter : MonoBehaviour
     [Header("Hierarchy paths (relative to this Frame)")]
     public string leftArmContainerName = "left_arm_container";
     public string rightArmContainerName = "right_arm_container";
+    [Tooltip("Replacement hand transform used while carrying. Right arm is hidden; held item parents here. Auto-resolved by name if left unset.")]
+    public Transform rightHoldingHand;
+    public string rightHoldingHandName = "right_holding_hand";
+
+    [Header("Right holding hand gyration (while moving + holding)")]
+    [Tooltip("Seconds for a full left-right-left cycle.")]
+    public float holdingHandPeriod = 0.6f;
+    [Tooltip("Max horizontal (local X) offset from rest, in either direction.")]
+    public float holdingHandXOffset = 0.25f;
+    [Tooltip("Vertical (local Y) lift at the sides; the middle dips back to rest (valley).")]
+    public float holdingHandYOffset = 0.1f;
 
     [Header("Input")]
     [Tooltip("Extra radial deadzone applied on top of the Input System's built-in stick deadzone. 0 = trust the asset's deadzone only.")]
@@ -96,6 +107,9 @@ public class OvercookedCharacter : MonoBehaviour
     private Quaternion rightArmRestRot;
     private Vector3 leftArmRestPos;
     private Vector3 rightArmRestPos;
+    private Vector3 rightHoldingHandRestPos;
+    private bool hasRightHoldingHandRest;
+    private float holdingHandPhase;
     private Vector3 placementAnchorRestPos;
     private bool hasPlacementAnchorRest;
 
@@ -122,6 +136,7 @@ public class OvercookedCharacter : MonoBehaviour
     private float verticalVelocity;
 
     private Vector2 moveInput;
+    private Vector2 turnInput;
     private PlayerInput playerInput;
 
     public bool IsHolding => heldItem != null;
@@ -160,6 +175,11 @@ public class OvercookedCharacter : MonoBehaviour
     public void OnMove(InputValue value)
     {
         moveInput = value.Get<Vector2>();
+    }
+
+    public void OnTurn(InputValue value)
+    {
+        turnInput = value.Get<Vector2>();
     }
 
     public void OnPickup(InputValue value)
@@ -213,13 +233,27 @@ public class OvercookedCharacter : MonoBehaviour
             hasPlacementAnchorRest = true;
         }
 
+        if (rightHoldingHand == null) rightHoldingHand = FindDescendant(transform, rightHoldingHandName);
+        if (rightHoldingHand != null)
+        {
+            rightHoldingHandRestPos = rightHoldingHand.localPosition;
+            hasRightHoldingHandRest = true;
+        }
+
         if (holdAnchor == null)
         {
-            GameObject anchor = new GameObject("HoldAnchor");
-            anchor.transform.SetParent(transform, false);
-            anchor.transform.localPosition = holdAnchorLocalPos;
-            anchor.transform.localRotation = Quaternion.identity;
-            holdAnchor = anchor.transform;
+            if (rightHoldingHand != null)
+            {
+                holdAnchor = rightHoldingHand;
+            }
+            else
+            {
+                GameObject anchor = new GameObject("HoldAnchor");
+                anchor.transform.SetParent(transform, false);
+                anchor.transform.localPosition = holdAnchorLocalPos;
+                anchor.transform.localRotation = Quaternion.identity;
+                holdAnchor = anchor.transform;
+            }
         }
 
         if (debugInput)
@@ -234,11 +268,18 @@ public class OvercookedCharacter : MonoBehaviour
     private void Update()
     {
         Vector3 move = ReadMoveInput();
-        bool moving = tankControls
-            ? (Mathf.Abs(move.x) > 0.0001f || Mathf.Abs(move.z) > 0.0001f)
-            : move.sqrMagnitude > 0.0001f;
+        float turn = ReadTurnInput();
+        bool usingGamepad = IsGamepadScheme();
 
-        ApplyMovement(move);
+        bool moving;
+        if (usingGamepad)
+            moving = move.sqrMagnitude > 0.0001f || Mathf.Abs(turn) > 0.0001f;
+        else if (tankControls)
+            moving = Mathf.Abs(move.x) > 0.0001f || Mathf.Abs(move.z) > 0.0001f;
+        else
+            moving = move.sqrMagnitude > 0.0001f;
+
+        ApplyMovement(move, turn, usingGamepad);
         ApplySway(moving);
         ApplyArmPose(moving);
 
@@ -262,19 +303,46 @@ public class OvercookedCharacter : MonoBehaviour
         return dir;
     }
 
-    private void ApplyMovement(Vector3 move)
+    private float ReadTurnInput()
+    {
+        float x = turnInput.x;
+        float ax = Mathf.Abs(x);
+        if (ax < stickDeadzone) return 0f;
+        if (stickDeadzone > 0f)
+        {
+            float rescaled = (ax - stickDeadzone) / (1f - stickDeadzone);
+            return Mathf.Sign(x) * Mathf.Clamp01(rescaled);
+        }
+        return x;
+    }
+
+    private bool IsGamepadScheme()
+    {
+        return playerInput != null && playerInput.currentControlScheme == "Gamepad";
+    }
+
+    private void ApplyMovement(Vector3 move, float turn, bool usingGamepad)
     {
         if (controller.isGrounded && verticalVelocity < 0f) verticalVelocity = -1f;
         verticalVelocity -= gravity * Time.deltaTime;
 
         Vector3 horizontal;
-        if (tankControls)
+        if (usingGamepad)
         {
-            // move.x = turn (yaw), move.z = forward/back along current facing.
-            float turn = move.x;
+            // Left stick = local-space motion (forward/strafe relative to facing), right stick X = turn.
             if (Mathf.Abs(turn) > 0.0001f)
             {
                 transform.Rotate(0f, turn * turnSpeed * Time.deltaTime, 0f, Space.World);
+            }
+            horizontal = (transform.forward * move.z + transform.right * move.x) * moveSpeed;
+        }
+        else if (tankControls)
+        {
+            // move.x = turn (yaw), move.z = forward/back along current facing.
+            float t = move.x;
+            if (Mathf.Abs(t) > 0.0001f)
+            {
+                transform.Rotate(0f, t * turnSpeed * Time.deltaTime, 0f, Space.World);
             }
             horizontal = transform.forward * (move.z * moveSpeed);
         }
@@ -322,17 +390,16 @@ public class OvercookedCharacter : MonoBehaviour
     {
         if (hasKnife)
         {
+            SetRightArmVisible(true);
             ApplyKnifePose();
             return;
         }
 
-        if (IsHolding)
-        {
-            ApplyCarryPose();
-            return;
-        }
-
-        ApplyPlacementAnchorOverride(null);
+        // While holding: right arm hidden (held item rides on right_holding_hand), left arm keeps normal walk swing.
+        bool holding = IsHolding;
+        SetRightArmVisible(!holding);
+        SetRightHoldingHandVisible(holding);
+        ApplyHoldingHandGyration(holding, moving);
 
         if (moving)
         {
@@ -341,19 +408,19 @@ public class OvercookedCharacter : MonoBehaviour
 
             float leftMid = (leftArmMin + leftArmMax) * 0.5f;
             float leftAmp = (leftArmMax - leftArmMin) * 0.5f;
-            float rightMid = (rightArmMin + rightArmMax) * 0.5f;
-            float rightAmp = (rightArmMax - rightArmMin) * 0.5f;
-
             float leftAngle = leftMid + leftAmp * s;
-            float rightAngle = rightMid - rightAmp * s; // opposite phase
 
             if (leftArm != null)
             {
                 leftArm.localPosition = leftArmRestPos;
                 leftArm.localRotation = leftArmRestRot * Quaternion.Euler(leftAngle, 0f, 0f);
             }
-            if (rightArm != null)
+
+            if (!holding && rightArm != null)
             {
+                float rightMid = (rightArmMin + rightArmMax) * 0.5f;
+                float rightAmp = (rightArmMax - rightArmMin) * 0.5f;
+                float rightAngle = rightMid - rightAmp * s; // opposite phase
                 rightArm.localPosition = rightArmRestPos;
                 rightArm.localRotation = rightArmRestRot * Quaternion.Euler(rightAngle, 0f, 0f);
             }
@@ -366,7 +433,7 @@ public class OvercookedCharacter : MonoBehaviour
                 leftArm.localPosition = leftArmRestPos;
                 leftArm.localRotation = leftArmRestRot;
             }
-            if (rightArm != null)
+            if (!holding && rightArm != null)
             {
                 rightArm.localPosition = rightArmRestPos;
                 rightArm.localRotation = rightArmRestRot;
@@ -374,48 +441,50 @@ public class OvercookedCharacter : MonoBehaviour
         }
     }
 
-    private void ApplyCarryPose()
+    private void SetRightArmVisible(bool visible)
     {
-        Vector3 lPos = leftCarryPos;
-        Vector3 rPos = rightCarryPos;
-        Vector3 lEuler = leftCarryEuler;
-        Vector3 rEuler = rightCarryEuler;
-
-        CarryPose pose = heldItem != null ? heldItem.GetComponent<CarryPose>() : null;
-        if (pose != null)
-        {
-            if (pose.overrideLeftPos)
-            {
-                lPos = pose.leftHandPos;
-                rPos = pose.GetMirroredRightPos();
-            }
-            if (pose.overrideLeftEuler)
-            {
-                lEuler = pose.leftHandEuler;
-                rEuler = pose.GetMirroredRightEuler();
-            }
-        }
-
-        ApplyPlacementAnchorOverride(pose);
-
-        if (leftArm != null)
-        {
-            leftArm.localPosition = lPos;
-            leftArm.localRotation = leftArmRestRot * Quaternion.Euler(lEuler);
-        }
-        if (rightArm != null)
-        {
-            rightArm.localPosition = rPos;
-            rightArm.localRotation = rightArmRestRot * Quaternion.Euler(rEuler);
-        }
+        if (rightArm == null) return;
+        if (rightArm.gameObject.activeSelf != visible) rightArm.gameObject.SetActive(visible);
     }
 
-    private void ApplyPlacementAnchorOverride(CarryPose pose)
+    private void ApplyHoldingHandGyration(bool holding, bool moving)
     {
-        if (placementAnchor == null || !hasPlacementAnchorRest) return;
-        placementAnchor.localPosition = (pose != null && pose.overridePlacementAnchor)
-            ? pose.placementAnchorLocalPos
-            : placementAnchorRestPos;
+        if (rightHoldingHand == null || !hasRightHoldingHandRest) return;
+
+        if (!holding || !moving || holdingHandPeriod <= 0f)
+        {
+            holdingHandPhase = 0f;
+            rightHoldingHand.localPosition = rightHoldingHandRestPos;
+            return;
+        }
+
+        holdingHandPhase += (Mathf.PI * 2f / holdingHandPeriod) * Time.deltaTime;
+        if (holdingHandPhase > Mathf.PI * 2f) holdingHandPhase -= Mathf.PI * 2f;
+
+        // sin sweeps x from -offset → +offset; |sin| peaks at the sides and is 0 in the middle (valley).
+        float s = Mathf.Sin(holdingHandPhase);
+        float dx = holdingHandXOffset * s;
+        float dy = holdingHandYOffset * Mathf.Abs(s);
+
+        rightHoldingHand.localPosition = rightHoldingHandRestPos + new Vector3(dx, dy, 0f);
+    }
+
+    private void SetRightHoldingHandVisible(bool visible)
+    {
+        if (rightHoldingHand == null) return;
+        if (rightHoldingHand.gameObject.activeSelf != visible) rightHoldingHand.gameObject.SetActive(visible);
+    }
+
+    private static Transform FindDescendant(Transform root, string name)
+    {
+        if (root == null || string.IsNullOrEmpty(name)) return null;
+        if (root.name == name) return root;
+        for (int i = 0; i < root.childCount; i++)
+        {
+            Transform hit = FindDescendant(root.GetChild(i), name);
+            if (hit != null) return hit;
+        }
+        return null;
     }
 
     private void OnPickupPressed()
@@ -432,6 +501,7 @@ public class OvercookedCharacter : MonoBehaviour
 
         if (IsHolding)
         {
+            if (TryTrash(station)) return;
             if (TryDepositHeldFoodIntoStationPot(station)) return;
             if (TryDepositStationFoodIntoHeldPot(station)) return;
             if (TryPlateFromStationPot(station)) return;
@@ -463,6 +533,35 @@ public class OvercookedCharacter : MonoBehaviour
         }
     }
 
+    private bool TryTrash(Station station)
+    {
+        if (station.kind != StationKind.Trashcan) return false;
+
+        switch (heldItem.kind)
+        {
+            case PickupableKind.Plate:
+                PlateSoup plateSoup = heldItem.GetComponentInChildren<PlateSoup>();
+                if (plateSoup != null) plateSoup.Clear();
+                else heldItem.plateContents = PlateContents.Empty;
+                Debug.Log($"[Overcooked] Trashed plate contents at {station.name}");
+                return true;
+
+            case PickupableKind.Pot:
+                PotContents pot = heldItem.GetComponentInChildren<PotContents>();
+                if (pot != null) pot.Empty(); // Empty() already sets burned=false
+                Debug.Log($"[Overcooked] Emptied pot at {station.name}");
+                return true;
+
+            case PickupableKind.Food:
+                Debug.Log($"[Overcooked] Trashed {heldItem.vegetableType} at {station.name}");
+                Destroy(heldItem.gameObject);
+                heldItem = null;
+                return true;
+        }
+
+        return false;
+    }
+
     private bool TryDepositHeldFoodIntoStationPot(Station station)
     {
         if (station.current == null || station.current.kind != PickupableKind.Pot)
@@ -476,7 +575,7 @@ public class OvercookedCharacter : MonoBehaviour
         if (pot == null)
         { Debug.Log($"[DepositToStationPot] reject: {station.current.name} has no PotContents component"); return false; }
         if (!pot.TryAddVegetable(heldItem.vegetableType))
-        { Debug.Log($"[DepositToStationPot] reject: TryAddVegetable failed (vegCount={pot.vegCount}, onFire={pot.onFire})"); return false; }
+        { Debug.Log($"[DepositToStationPot] reject: TryAddVegetable failed (vegCount={pot.vegCount}, burned={pot.burned})"); return false; }
 
         Debug.Log($"[Overcooked] Deposited {heldItem.vegetableType} into pot on {station.name} ({pot.vegCount}/{PotContents.MaxVegetables})");
         Destroy(heldItem.gameObject);
@@ -497,7 +596,7 @@ public class OvercookedCharacter : MonoBehaviour
         if (pot == null)
         { Debug.Log($"[DepositToHeldPot] reject: held pot has no PotContents"); return false; }
         if (!pot.TryAddVegetable(station.current.vegetableType))
-        { Debug.Log($"[DepositToHeldPot] reject: TryAddVegetable failed (vegCount={pot.vegCount}, onFire={pot.onFire})"); return false; }
+        { Debug.Log($"[DepositToHeldPot] reject: TryAddVegetable failed (vegCount={pot.vegCount}, burned={pot.burned})"); return false; }
 
         Debug.Log($"[Overcooked] Deposited {station.current.vegetableType} from {station.name} into held pot ({pot.vegCount}/{PotContents.MaxVegetables})");
         Pickupable food = station.TryTake();
@@ -518,7 +617,7 @@ public class OvercookedCharacter : MonoBehaviour
         if (pot == null)
         { Debug.Log($"[PlateFromStationPot] reject: pot has no PotContents"); return false; }
         if (!pot.TryGetSoupType(out VegetableType soupType))
-        { Debug.Log($"[PlateFromStationPot] reject: pot not single-type fully cooked (veg={pot.vegCount}, cook={pot.cookSeconds:F1}/{pot.TotalCookTime:F1}, fire={pot.onFire})"); return false; }
+        { Debug.Log($"[PlateFromStationPot] reject: pot not single-type fully cooked (veg={pot.vegCount}, cook={pot.cookSeconds:F1}/{pot.TotalCookTime:F1}, fire={pot.burned})"); return false; }
 
         PlateSoup plateSoup = heldItem.GetComponentInChildren<PlateSoup>();
         if (plateSoup == null)
@@ -545,7 +644,7 @@ public class OvercookedCharacter : MonoBehaviour
         if (pot == null)
         { Debug.Log($"[PlateFromHeldPot] reject: held pot has no PotContents"); return false; }
         if (!pot.TryGetSoupType(out VegetableType soupType))
-        { Debug.Log($"[PlateFromHeldPot] reject: pot not single-type fully cooked (veg={pot.vegCount}, cook={pot.cookSeconds:F1}/{pot.TotalCookTime:F1}, fire={pot.onFire})"); return false; }
+        { Debug.Log($"[PlateFromHeldPot] reject: pot not single-type fully cooked (veg={pot.vegCount}, cook={pot.cookSeconds:F1}/{pot.TotalCookTime:F1}, fire={pot.burned})"); return false; }
 
         PlateSoup plateSoup = plate.GetComponentInChildren<PlateSoup>();
         if (plateSoup == null)
