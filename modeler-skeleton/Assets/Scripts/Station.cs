@@ -1,6 +1,6 @@
 using UnityEngine;
 
-public enum StationKind { Counter, CuttingBoard, Sink, FireExtinguisher, Burner }
+public enum StationKind { Counter, CuttingBoard, Sink, FireExtinguisher, Burner, SupplyBox, Trashcan }
 
 public class Station : MonoBehaviour
 {
@@ -14,6 +14,9 @@ public class Station : MonoBehaviour
 
     [Tooltip("Knife transform (for CuttingBoard kind). Borrowed by the character while cutting.")]
     public Transform knife;
+
+    [Tooltip("Prefab dispensed when a player picks up from an empty SupplyBox (e.g. an onion Pickupable).")]
+    public Pickupable supplyPrefab;
 
     private void Start()
     {
@@ -34,7 +37,15 @@ public class Station : MonoBehaviour
 
     public Pickupable TryTake()
     {
-        if (current == null) return null;
+        if (current == null)
+        {
+            if (kind == StationKind.SupplyBox && supplyPrefab != null)
+            {
+                // Spawn at the placement anchor so it has a sensible world pose before OnPickedUp re-parents it.
+                return Instantiate(supplyPrefab, placementAnchor.position, placementAnchor.rotation);
+            }
+            return null;
+        }
         Pickupable p = current;
         current = null;
         return p;
