@@ -1,6 +1,6 @@
 using UnityEngine;
 
-public enum PickupableKind { Food, Plate, Pot }
+public enum PickupableKind { Food, Plate, Pot, FireExtinguisher }
 public enum FoodState { Raw, Cut }
 public enum VegetableType { Carrot, Onion }
 public enum PlateState { Clean, Dirty }
@@ -25,10 +25,6 @@ public class Pickupable : MonoBehaviour
     public int cutsRequired = 5;
     [Tooltip("Read-only-ish — incremented by OvercookedCharacter when a chop lands.")]
     public int cutProgress = 0;
-    [Tooltip("Auto-create a 3D progress meter above this item while it's being cut.")]
-    public bool showCutMeter = true;
-    [Tooltip("Vertical offset (world units) above the item's pivot to place the meter.")]
-    public float cutMeterYOffset = 1.0f;
 
     public int CutsRequired => (cutStageVisuals != null && cutStageVisuals.Length >= 2)
         ? cutStageVisuals.Length - 1
@@ -45,7 +41,6 @@ public class Pickupable : MonoBehaviour
     [TextArea] public string potNote = "See PotContents component for vegetable count, cook timer, and visuals.";
 
     private Collider[] cachedColliders;
-    private CutProgressMeter cutMeter;
 
     void Awake()
     {
@@ -61,13 +56,7 @@ public class Pickupable : MonoBehaviour
         if (cutProgress >= needed)
         {
             foodState = FoodState.Cut;
-            if (cutMeter != null) cutMeter.Hide();
             return true; // finished
-        }
-        if (showCutMeter)
-        {
-            if (cutMeter == null) cutMeter = CutProgressMeter.AttachTo(this);
-            cutMeter.SetProgress((float)cutProgress / needed);
         }
         return false;
     }

@@ -23,6 +23,9 @@ public class PotContents : MonoBehaviour
     [Tooltip("Child shown instead of the per-type visuals when the pot is burned.")]
     public GameObject burnedVisual;
 
+    [Tooltip("Optional 3D progress meter on the pot. Driven by cookSeconds / TotalCookTime.")]
+    public ProgressIndicator progressIndicator;
+
     [Header("State (read-only-ish)")]
     public int vegCount;
     public float cookSeconds;
@@ -32,7 +35,7 @@ public class PotContents : MonoBehaviour
     // Per-type counts, indexed by (int)VegetableType.
     private readonly Dictionary<VegetableType, int> perType = new Dictionary<VegetableType, int>();
 
-    public float TotalCookTime => SecondsPerVegetable * vegCount;
+    public float TotalCookTime => vegCount > 0 ? SecondsPerVegetable : 0f;
     public bool IsFull => vegCount >= MaxVegetables;
     public bool IsFullyCooked => vegCount == MaxVegetables && cookSeconds >= TotalCookTime;
 
@@ -59,8 +62,10 @@ public class PotContents : MonoBehaviour
         vegCount++;
         perType.TryGetValue(type, out int n);
         perType[type] = n + 1;
+        if (vegCount > 1) cookSeconds *= 0.5f;
         overcookSeconds = 0f;
         RefreshVisuals();
+        UpdateIndicator();
         return true;
     }
 
@@ -72,6 +77,7 @@ public class PotContents : MonoBehaviour
         burned = false;
         perType.Clear();
         RefreshVisuals();
+        UpdateIndicator();
     }
 
     public int CountOf(VegetableType type)
@@ -82,12 +88,13 @@ public class PotContents : MonoBehaviour
 
     public void Tick(float dt)
     {
-        if (vegCount == 0 || burned) return;
+        if (vegCount == 0 || burned) { UpdateIndicator(); return; }
 
         float total = TotalCookTime;
         if (cookSeconds < total)
         {
             cookSeconds = Mathf.Min(cookSeconds + dt, total);
+            UpdateIndicator();
             return;
         }
 
@@ -97,6 +104,16 @@ public class PotContents : MonoBehaviour
             burned = true;
             RefreshVisuals();
         }
+        UpdateIndicator();
+    }
+
+    private void UpdateIndicator()
+    {
+        if (progressIndicator == null) return;
+        if (vegCount == 0 || burned) { progressIndicator.SetProgress(0f); return; }
+        float total = TotalCookTime;
+        float t = total > 0f ? cookSeconds / total : 0f;
+        progressIndicator.SetProgress(t);
     }
 
     private void RefreshVisuals()

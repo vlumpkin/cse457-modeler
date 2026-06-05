@@ -142,3 +142,10 @@ MonoBehaviour:
   restEuler: {x: -50.4, y: 5.76, z: 28.7}
   sliceEuler: {x: 60, y: 0, z: 0}
   chopDuration: 0.25
+  downFraction: 0.22
+  holdFraction: 0.08
+  downEasePower: 2.4
+  upEasePower: 1.4
+  overrideArmPosition: 0
+  restArmPos: {x: 0, y: 0, z: 0}
+  sliceArmPos: {x: 0, y: 0, z: 0}
