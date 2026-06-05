@@ -51,6 +51,8 @@ MonoBehaviour:
   placementAnchor: {fileID: 742799639162954076}
   current: {fileID: 5187487174146649622}
   knife: {fileID: 0}
+  supplyPrefab: {fileID: 0}
+  progressIndicator: {fileID: 0}
 --- !u!1 &3534526792850892348
 GameObject:
   m_ObjectHideFlags: 0
@@ -99,7 +101,7 @@ GameObject:
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
+  m_StaticEditorFlags: 83
   m_IsActive: 1
 --- !u!4 &4856141765148331654
 Transform:

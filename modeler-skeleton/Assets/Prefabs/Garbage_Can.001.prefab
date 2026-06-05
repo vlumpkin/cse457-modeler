@@ -18,7 +18,7 @@ GameObject:
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
+  m_StaticEditorFlags: 83
   m_IsActive: 1
 --- !u!4 &6516628914464432422
 Transform:
@@ -130,3 +130,4 @@ MonoBehaviour:
   current: {fileID: 0}
   knife: {fileID: 0}
   supplyPrefab: {fileID: 0}
+  progressIndicator: {fileID: 0}

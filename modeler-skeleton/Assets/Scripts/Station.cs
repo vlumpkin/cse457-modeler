@@ -18,6 +18,9 @@ public class Station : MonoBehaviour
     [Tooltip("Prefab dispensed when a player picks up from an empty SupplyBox (e.g. an onion Pickupable).")]
     public Pickupable supplyPrefab;
 
+    [Tooltip("Optional 3D progress meter above this station. Used by CuttingBoard (cuts/total). Burner cooking progress lives on the pot itself.")]
+    public ProgressIndicator progressIndicator;
+
     private void Start()
     {
         if (placementAnchor == null) placementAnchor = transform;
@@ -53,8 +56,34 @@ public class Station : MonoBehaviour
 
     private void Update()
     {
-        if (kind != StationKind.Burner || current == null) return;
+        switch (kind)
+        {
+            case StationKind.Burner:
+                TickBurner();
+                break;
+            case StationKind.CuttingBoard:
+                TickCuttingBoard();
+                break;
+        }
+    }
+
+    private void TickBurner()
+    {
+        if (current == null) return;
         PotContents pot = current.GetComponentInChildren<PotContents>();
         if (pot != null) pot.Tick(Time.deltaTime);
+    }
+
+    private void TickCuttingBoard()
+    {
+        if (progressIndicator == null) return;
+        if (current == null || current.kind != PickupableKind.Food || current.foodState != FoodState.Raw)
+        {
+            progressIndicator.SetProgress(0f);
+            return;
+        }
+        int needed = current.CutsRequired;
+        float t = needed > 0 ? (float)current.cutProgress / needed : 0f;
+        progressIndicator.SetProgress(t);
     }
 }
