@@ -45,7 +45,9 @@ public class Station : MonoBehaviour
             if (kind == StationKind.SupplyBox && supplyPrefab != null)
             {
                 // Spawn at the placement anchor so it has a sensible world pose before OnPickedUp re-parents it.
-                return Instantiate(supplyPrefab, placementAnchor.position, placementAnchor.rotation);
+                Pickupable spawned = Instantiate(supplyPrefab, placementAnchor.position, placementAnchor.rotation);
+                if (GameProgressTracker.Instance != null) GameProgressTracker.Instance.RegisterWork(1f);
+                return spawned;
             }
             return null;
         }
