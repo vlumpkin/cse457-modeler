@@ -622,9 +622,12 @@ public class OvercookedCharacter : MonoBehaviour
         PlateSoup plateSoup = heldItem.GetComponentInChildren<PlateSoup>();
         if (plateSoup == null)
         { Debug.Log($"[PlateFromStationPot] reject: plate has no PlateSoup component"); return false; }
+        if (plateSoup.isDirty)
+        { Debug.Log($"[PlateFromStationPot] reject: held plate is dirty"); return false; }
 
+        if (!plateSoup.TrySetSoup(soupType))
+        { Debug.Log($"[PlateFromStationPot] reject: plate refused soup"); return false; }
         pot.Empty();
-        plateSoup.SetSoup(soupType);
         Debug.Log($"[Overcooked] Plated {soupType} soup from {station.name}");
         return true;
     }
@@ -649,9 +652,12 @@ public class OvercookedCharacter : MonoBehaviour
         PlateSoup plateSoup = plate.GetComponentInChildren<PlateSoup>();
         if (plateSoup == null)
         { Debug.Log($"[PlateFromHeldPot] reject: plate has no PlateSoup component"); return false; }
+        if (plateSoup.isDirty)
+        { Debug.Log($"[PlateFromHeldPot] reject: station plate is dirty"); return false; }
 
+        if (!plateSoup.TrySetSoup(soupType))
+        { Debug.Log($"[PlateFromHeldPot] reject: plate refused soup"); return false; }
         pot.Empty();
-        plateSoup.SetSoup(soupType);
         Debug.Log($"[Overcooked] Plated {soupType} soup onto {plate.name}");
         return true;
     }

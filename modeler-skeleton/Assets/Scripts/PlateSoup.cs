@@ -16,6 +16,13 @@ public class PlateSoup : MonoBehaviour
     [Header("Per-type soup visuals (toggled when plate holds that soup)")]
     public List<SoupVisual> visuals = new List<SoupVisual>();
 
+    [Header("Dirty state")]
+    [Tooltip("Child GameObject shown when the plate is dirty. While dirty the plate cannot hold soup.")]
+    public GameObject dirtyVisual;
+
+    [Tooltip("Whether the plate starts dirty.")]
+    public bool isDirty;
+
     private Pickupable plate;
 
     private void Awake()
@@ -24,12 +31,17 @@ public class PlateSoup : MonoBehaviour
         RefreshVisuals();
     }
 
-    public void SetSoup(VegetableType type)
+    public bool TrySetSoup(VegetableType type)
     {
+        if (isDirty) return false;
         plate.plateContents = PlateContents.Soup;
         plate.soupType = type;
         RefreshVisuals();
+        return true;
     }
+
+    // Kept for compatibility with existing callers; no-op when dirty.
+    public void SetSoup(VegetableType type) => TrySetSoup(type);
 
     public void Clear()
     {
@@ -37,14 +49,22 @@ public class PlateSoup : MonoBehaviour
         RefreshVisuals();
     }
 
+    public void SetDirty(bool dirty)
+    {
+        isDirty = dirty;
+        if (dirty) plate.plateContents = PlateContents.Empty;
+        RefreshVisuals();
+    }
+
     private void RefreshVisuals()
     {
-        bool hasSoup = plate.plateContents == PlateContents.Soup;
+        bool hasSoup = !isDirty && plate.plateContents == PlateContents.Soup;
         for (int i = 0; i < visuals.Count; i++)
         {
             var v = visuals[i];
             if (v.visual == null) continue;
             v.visual.SetActive(hasSoup && v.type == plate.soupType);
         }
+        if (dirtyVisual != null) dirtyVisual.SetActive(isDirty);
     }
 }
