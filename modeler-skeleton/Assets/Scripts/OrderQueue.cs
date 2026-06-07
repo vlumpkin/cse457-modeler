@@ -4,6 +4,8 @@ using UnityEngine.UI;
 
 public class OrderQueue : MonoBehaviour
 {
+    public static OrderQueue Instance { get; private set; }
+
     public GameObject orderPrefab;
     public Transform queueParent;
     public float[] spawnTimes = { 5f, 23f, 30f };
@@ -11,12 +13,19 @@ public class OrderQueue : MonoBehaviour
     private class OrderTimer
     {
         public RectTransform fillRect;
-        public float remaining = 30f;
+        public float remaining = 60f;
+        public VegetableType soupType;
+        public GameObject ticketObject;
     }
 
     private readonly List<OrderTimer> timers = new List<OrderTimer>();
     private int nextIndex;
     private float t;
+
+    private void Awake()
+    {
+        Instance = this;
+    }
 
     void Update()
     {
@@ -34,7 +43,7 @@ public class OrderQueue : MonoBehaviour
             timer.remaining -= Time.deltaTime;
             if (timer.remaining < 0f) timer.remaining = 0f;
 
-            float fraction = timer.remaining / 30f;
+            float fraction = timer.remaining / 60f;
 
             // Shrink fill width from right by moving anchorMax.x
             timer.fillRect.anchorMax = new Vector2(fraction, 1f);
@@ -45,8 +54,27 @@ public class OrderQueue : MonoBehaviour
         }
     }
 
+    public bool TryFulfillOrder(VegetableType type)
+    {
+        int oldestIndex = -1;
+        float minRemaining = float.MaxValue;
+        for (int i = 0; i < timers.Count; i++)
+        {
+            if (timers[i].soupType == type && timers[i].remaining < minRemaining)
+            {
+                minRemaining = timers[i].remaining;
+                oldestIndex = i;
+            }
+        }
+        if (oldestIndex < 0) return false;
+        if (timers[oldestIndex].ticketObject != null) Destroy(timers[oldestIndex].ticketObject);
+        timers.RemoveAt(oldestIndex);
+        return true;
+    }
+
     private void SpawnOrder()
     {
+        VegetableType type = (VegetableType)Random.Range(0, System.Enum.GetValues(typeof(VegetableType)).Length);
         GameObject go = Instantiate(orderPrefab, queueParent);
 
         // Dark background strip
@@ -72,6 +100,6 @@ public class OrderQueue : MonoBehaviour
         fillRt.offsetMin = Vector2.zero;
         fillRt.offsetMax = Vector2.zero;
 
-        timers.Add(new OrderTimer { fillRect = fillRt });
+        timers.Add(new OrderTimer { fillRect = fillRt, soupType = type, ticketObject = go });
     }
 }

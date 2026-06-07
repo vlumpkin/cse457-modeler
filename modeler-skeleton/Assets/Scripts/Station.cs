@@ -1,6 +1,6 @@
 using UnityEngine;
 
-public enum StationKind { Counter, CuttingBoard, Sink, FireExtinguisher, Burner, SupplyBox, Trashcan }
+public enum StationKind { Counter, CuttingBoard, Sink, FireExtinguisher, Burner, SupplyBox, Trashcan, DeliveryCounter }
 
 public class Station : MonoBehaviour
 {

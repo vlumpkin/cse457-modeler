@@ -502,6 +502,7 @@ public class OvercookedCharacter : MonoBehaviour
         if (IsHolding)
         {
             if (TryTrash(station)) return;
+            if (TryDeliver(station)) return;
             if (TryDepositHeldFoodIntoStationPot(station)) return;
             if (TryDepositStationFoodIntoHeldPot(station)) return;
             if (TryPlateFromStationPot(station)) return;
@@ -531,6 +532,28 @@ public class OvercookedCharacter : MonoBehaviour
                 Debug.Log($"[Overcooked] {station.name} is empty");
             }
         }
+    }
+
+    private bool TryDeliver(Station station)
+    {
+        if (station.kind != StationKind.DeliveryCounter) return false;
+        if (heldItem.kind != PickupableKind.Plate) return false;
+        if (heldItem.plateContents != PlateContents.Soup) return false;
+
+        if (OrderQueue.Instance != null)
+        {
+            if (OrderQueue.Instance.TryFulfillOrder(heldItem.soupType))
+                Debug.Log($"[Overcooked] Delivered {heldItem.soupType} soup — order fulfilled");
+            else
+                Debug.Log($"[Overcooked] No matching order for {heldItem.soupType} soup");
+        }
+
+        if (station.TryPlace(heldItem))
+        {
+            heldItem = null;
+            return true;
+        }
+        return false;
     }
 
     private bool TryTrash(Station station)
