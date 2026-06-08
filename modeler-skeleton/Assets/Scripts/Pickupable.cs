@@ -2,7 +2,7 @@ using UnityEngine;
 
 public enum PickupableKind { Food, Plate, Pot, FireExtinguisher }
 public enum FoodState { Raw, Cut }
-public enum VegetableType { Carrot, Onion }
+public enum VegetableType { Carrot, Onion, Tomato }
 public enum PlateState { Clean, Dirty }
 public enum PlateContents { Empty, Soup }
 
