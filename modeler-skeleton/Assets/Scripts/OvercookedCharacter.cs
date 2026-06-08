@@ -35,6 +35,10 @@ public class OvercookedCharacter : MonoBehaviour
     public Vector3 rightCarryEuler = new Vector3(0f, 0f, -23f);
 
     [Header("Hierarchy paths (relative to this Frame)")]
+    [Tooltip("Optional sub-container holding all the character's visual children (arms, body mesh, etc). " +
+             "When set, sway and wash lean are applied to this transform instead of the root, so the camera " +
+             "(which follows the root) doesn't see those rotations. Leave null to apply rotations to the root.")]
+    public Transform bodyVisualRoot;
     public string leftArmContainerName = "left_arm_container";
     public string rightArmContainerName = "right_arm_container";
     [Tooltip("Replacement hand transform used while carrying. Right arm is hidden; held item parents here. Auto-resolved by name if left unset.")]
@@ -76,6 +80,37 @@ public class OvercookedCharacter : MonoBehaviour
     [Tooltip("Optional material. If left null, an unlit transparent material is generated at runtime.")]
     public Material highlightMaterial;
 
+    public enum WashHand { Left, Right }
+
+    [Header("Washing (Sink)")]
+    [Tooltip("Which arm performs the wash motion.")]
+    public WashHand washHand = WashHand.Right;
+    [Tooltip("Amplitude along the plane's side axis (meters).")]
+    public float washCircleSide = 0.25f;
+    [Tooltip("Amplitude along the plane's forward axis (meters). Equal to washCircleSide gives a circle; unequal gives an ellipse.")]
+    public float washCircleForward = 0.25f;
+    [Tooltip("Number of full circles the hand traces during one wash cycle.")]
+    public float washCircleRevolutions = 3f;
+    [Tooltip("Euler rotation (degrees) that orients the circle plane in CHARACTER-ROOT space. " +
+             "(0,0,0) = horizontal scrub (character XZ). Rotate around X to tilt the plane forward/back, " +
+             "around Z to tilt side-to-side. Lift is applied along the plane's normal. " +
+             "Because this is character-relative, the scrub stays oriented to the character's facing — " +
+             "turning the character turns the plane with them.")]
+    public Vector3 washPlaneEuler = Vector3.zero;
+    [Tooltip("Constant offset along the plane's normal direction — lifts the hand above the plane (meters).")]
+    public float washHandLift = 0f;
+    [Tooltip("Absolute body-local Euler rotation of the washing arm container while washing. " +
+             "Replaces the arm's rest rotation entirely — (30, 0, 0) means '30° pitch in body space,' " +
+             "regardless of what the arm's rest rotation was.")]
+    public Vector3 washArmEuler = Vector3.zero;
+    [Tooltip("Body-local position the washing arm container sits at while washing. " +
+             "REPLACES the arm's rest position as the base — the circular motion is added on top. " +
+             "Leave at (0,0,0) to fall back to the arm's captured rest position.")]
+    public Vector3 washArmLocalPos = Vector3.zero;
+    [Tooltip("Additional Euler rotation applied to the character frame while washing — a forward lean over the sink. " +
+             "Composes on top of the existing sway. Try (10, 0, 0) for a subtle hunch.")]
+    public Vector3 washBodyLeanEuler = Vector3.zero;
+
     [Header("Cutting")]
     [Tooltip("Seconds between chops. Each X press triggers one chop animation lasting this long.")]
     public float cutCooldown = 0.25f;
@@ -99,6 +134,8 @@ public class OvercookedCharacter : MonoBehaviour
     public Pickupable heldItem;
 
     private CharacterController controller;
+    private Transform tiltTarget;          // bodyVisualRoot if set, else transform — gets sway + lean
+    private Quaternion tiltTargetRestRot;  // rest rotation of tiltTarget at Start
     private Transform leftArm;
     private Transform rightArm;
 
@@ -128,8 +165,12 @@ public class OvercookedCharacter : MonoBehaviour
     private Quaternion knifeOriginalLocalRot;
     private KnifeGrip currentGrip;
 
+    private bool isWashing;
+    private Sink washSink;
+
     public bool HasKnife => hasKnife;
     public bool IsChopping => isChopping;
+    public bool IsWashing => isWashing;
 
     private float swayPhase;
     private float swingPhase;
@@ -210,8 +251,15 @@ public class OvercookedCharacter : MonoBehaviour
 
         frameRestRot = transform.localRotation;
 
-        leftArm = transform.Find(leftArmContainerName);
-        rightArm = transform.Find(rightArmContainerName);
+        // Tilt target = bodyVisualRoot when assigned, otherwise the root transform.
+        // Sway and wash lean both write here so the camera (following root) doesn't see them.
+        tiltTarget = bodyVisualRoot != null ? bodyVisualRoot : transform;
+        tiltTargetRestRot = tiltTarget.localRotation;
+
+        // Arm containers live under the visual root (or directly under the frame if not split out).
+        Transform visualSearchRoot = bodyVisualRoot != null ? bodyVisualRoot : transform;
+        leftArm = FindDescendant(visualSearchRoot, leftArmContainerName);
+        rightArm = FindDescendant(visualSearchRoot, rightArmContainerName);
 
         if (leftArm == null) Debug.LogWarning($"OvercookedCharacter: '{leftArmContainerName}' not found under {name}");
         if (rightArm == null) Debug.LogWarning($"OvercookedCharacter: '{rightArmContainerName}' not found under {name}");
@@ -280,12 +328,13 @@ public class OvercookedCharacter : MonoBehaviour
             moving = move.sqrMagnitude > 0.0001f;
 
         ApplyMovement(move, turn, usingGamepad);
-        ApplySway(moving);
+        ApplyBodyTilt(moving);
         ApplyArmPose(moving);
 
         UpdateFacing();
         UpdateKnifeEquip();
         TickChop();
+        TickWash();
     }
 
     private Vector3 ReadMoveInput()
@@ -368,21 +417,40 @@ public class OvercookedCharacter : MonoBehaviour
         }
     }
 
-    private void ApplySway(bool moving)
+    private void ApplyBodyTilt(bool moving)
     {
+        // Compute walk-sway roll.
+        float roll;
         if (moving)
         {
             swayPhase += swayFrequency * Time.deltaTime;
-            float roll = Mathf.Sin(swayPhase) * swayAmplitude;
-            // Preserve current yaw (set by ApplyMovement), only override local Z roll.
-            Vector3 e = transform.localEulerAngles;
-            transform.localRotation = Quaternion.Euler(e.x, e.y, roll);
+            roll = Mathf.Sin(swayPhase) * swayAmplitude;
         }
         else
         {
             swayPhase = 0f;
+            roll = 0f;
+        }
+
+        // Lean composition (full Euler, only while washing).
+        Quaternion leanQ = isWashing ? Quaternion.Euler(washBodyLeanEuler) : Quaternion.identity;
+
+        if (tiltTarget == transform)
+        {
+            // No sub-container: write back onto the root. Must preserve yaw set by ApplyMovement,
+            // and re-base pitch each frame to prevent the lean from accumulating into eulerAngles.x.
             Vector3 e = transform.localEulerAngles;
-            transform.localRotation = Quaternion.Euler(e.x, e.y, 0f);
+            float basePitch = frameRestRot.eulerAngles.x;
+            if (basePitch > 180f) basePitch -= 360f;
+            Quaternion baseR = Quaternion.Euler(basePitch, e.y, roll);
+            transform.localRotation = baseR * leanQ;
+        }
+        else
+        {
+            // Sub-container: it has no yaw responsibility, so start fresh from its rest pose each frame.
+            // Camera (following root) never sees these rotations.
+            Quaternion baseR = tiltTargetRestRot * Quaternion.Euler(0f, 0f, roll);
+            tiltTarget.localRotation = baseR * leanQ;
         }
     }
 
@@ -439,6 +507,44 @@ public class OvercookedCharacter : MonoBehaviour
                 rightArm.localRotation = rightArmRestRot;
             }
         }
+
+        // Washing override — circular motion on the chosen wash arm. Runs after the walk/rest
+        // pass so it stomps whatever was set on that arm. Drives off the sink's persistent
+        // progress so the circle resumes where it was when interrupted.
+        if (isWashing && washSink != null)
+        {
+            Transform arm = (washHand == WashHand.Right) ? rightArm : leftArm;
+            if (arm != null)
+            {
+                Vector3 restPos = (washHand == WashHand.Right) ? rightArmRestPos : leftArmRestPos;
+
+                // washArmLocalPos overrides the rest position while washing (sentinel: Vector3.zero
+                // = fall back to rest). The circle offset is added on top.
+                Vector3 basePos = washArmLocalPos != Vector3.zero ? washArmLocalPos : restPos;
+
+                // Build the circle's frame from washPlaneEuler interpreted in CHARACTER-ROOT space,
+                // then convert to the arm parent's local space (which is bodyVisualRoot when split
+                // out, else the root frame itself). Side/forward are the in-plane axes; up is the
+                // plane normal that the constant lift rides along.
+                //
+                // Conversion path: root-local → world (via root transform) → arm.parent local
+                // (via InverseTransformDirection). Works regardless of how arms are nested.
+                Quaternion planeQ = Quaternion.Euler(washPlaneEuler);
+                Transform armParent = arm.parent != null ? arm.parent : transform;
+                Vector3 sideAxis = armParent.InverseTransformDirection(transform.TransformDirection(planeQ * Vector3.right));
+                Vector3 fwdAxis = armParent.InverseTransformDirection(transform.TransformDirection(planeQ * Vector3.forward));
+                Vector3 normalAxis = armParent.InverseTransformDirection(transform.TransformDirection(planeQ * Vector3.up));
+
+                float t = washSink.WashProgress01;
+                float angle = t * Mathf.PI * 2f * washCircleRevolutions;
+                Vector3 offset = sideAxis * (Mathf.Cos(angle) * washCircleSide)
+                                 + fwdAxis * (Mathf.Sin(angle) * washCircleForward)
+                                 + normalAxis * washHandLift;
+
+                arm.localPosition = basePos + offset;
+                arm.localRotation = Quaternion.Euler(washArmEuler);
+            }
+        }
     }
 
     private void SetRightArmVisible(bool visible)
@@ -490,12 +596,27 @@ public class OvercookedCharacter : MonoBehaviour
     private void OnPickupPressed()
     {
         if (isChopping) return;
+        if (isWashing) StopWashing();
         if (hasKnife) UnequipKnife();
 
         Station station = FindFacingStation();
         if (station == null)
         {
             Debug.Log("[Overcooked] Pickup pressed — no Station in front of character");
+            return;
+        }
+
+        // Sink has its own deposit/take semantics and must short-circuit the default
+        // Station.TryPlace/TryTake fallthrough (plates are counters, never stored in station.current).
+        if (station.kind == StationKind.Sink)
+        {
+            Sink sink = station.GetComponent<Sink>();
+            if (sink == null)
+            {
+                Debug.LogWarning($"[Overcooked] {station.name} is StationKind.Sink but has no Sink component");
+                return;
+            }
+            HandleSinkPickup(sink);
             return;
         }
 
@@ -529,6 +650,38 @@ public class OvercookedCharacter : MonoBehaviour
             else
             {
                 Debug.Log($"[Overcooked] {station.name} is empty");
+            }
+        }
+    }
+
+    private void HandleSinkPickup(Sink sink)
+    {
+        if (IsHolding)
+        {
+            // Only dirty plates can be deposited.
+            if (sink.TryDepositDirtyPlate(heldItem))
+            {
+                Debug.Log($"[Overcooked] Deposited dirty plate at {sink.name} (dirty={sink.dirtyCount}, clean={sink.cleanCount})");
+                heldItem = null; // sink destroyed the GameObject
+            }
+            else
+            {
+                Debug.Log($"[Overcooked] {sink.name} rejected the held item (must be a dirty plate, sink must have room)");
+            }
+        }
+        else
+        {
+            // Empty-handed: take a clean plate if any.
+            Pickupable plate = sink.TryTakeCleanPlate(holdAnchor);
+            if (plate != null)
+            {
+                heldItem = plate;
+                heldItem.OnPickedUp(holdAnchor);
+                Debug.Log($"[Overcooked] Took clean plate from {sink.name} (dirty={sink.dirtyCount}, clean={sink.cleanCount})");
+            }
+            else
+            {
+                Debug.Log($"[Overcooked] {sink.name} has no clean plates");
             }
         }
     }
@@ -664,19 +817,72 @@ public class OvercookedCharacter : MonoBehaviour
 
     private void OnActionPressed()
     {
-        if (!hasKnife) return;
-        if (isChopping) return;
+        if (isChopping || isWashing) return;
 
-        // Begin a chop cycle. Animation runs for cutCooldown; the cut lands at the bottom of the chop.
-        isChopping = true;
-        chopTimer = 0f;
-
-        if (knifeStation != null && knifeStation.current != null)
+        if (hasKnife)
         {
-            bool finished = knifeStation.current.RegisterCut();
-            if (finished)
-                Debug.Log($"[Overcooked] {knifeStation.current.name} is now Cut");
+            // Begin a chop cycle. Animation runs for cutCooldown; the cut lands at the bottom of the chop.
+            isChopping = true;
+            chopTimer = 0f;
+
+            if (knifeStation != null && knifeStation.current != null)
+            {
+                bool finished = knifeStation.current.RegisterCut();
+                if (finished)
+                    Debug.Log($"[Overcooked] {knifeStation.current.name} is now Cut");
+            }
+            return;
         }
+
+        // Sink: begin a wash cycle if facing a sink with dirty plates and hands empty.
+        // Sink retains any partial progress from a previous interrupted wash, so this
+        // can resume mid-cycle.
+        if (!IsHolding && facingStation != null && facingStation.kind == StationKind.Sink)
+        {
+            Sink sink = facingStation.GetComponent<Sink>();
+            if (sink != null && sink.CanStartWash())
+            {
+                isWashing = true;
+                washSink = sink;
+                Debug.Log($"[Overcooked] Started washing at {sink.name} (resuming at {sink.WashProgress01:P0}, dirty={sink.dirtyCount}, clean={sink.cleanCount})");
+                return;
+            }
+        }
+    }
+
+    private void TickWash()
+    {
+        if (!isWashing) return;
+
+        // Stop (but don't reset sink's persistent progress) if the player walked away,
+        // picked something up, or the sink disappeared.
+        if (washSink == null || IsHolding || facingStation == null || facingStation.GetComponent<Sink>() != washSink)
+        {
+            StopWashing();
+            return;
+        }
+
+        Sink.WashTickResult result = washSink.AdvanceWash(Time.deltaTime);
+        if (result == Sink.WashTickResult.NotReady)
+        {
+            // No more dirty plates or sink is now full of clean — nothing left to do.
+            Debug.Log($"[Overcooked] Wash stopping (no work left) at {washSink.name}");
+            StopWashing();
+        }
+        else if (result == Sink.WashTickResult.Completed)
+        {
+            Debug.Log($"[Overcooked] Wash cycle complete at {washSink.name} (dirty={washSink.dirtyCount}, clean={washSink.cleanCount}); continuing if more dirty remain");
+            // Stay isWashing — next frame will either tick another plate (if dirty remain) or
+            // return NotReady and stop us above.
+        }
+    }
+
+    private void StopWashing()
+    {
+        // Note: does NOT touch washSink.washProgressSeconds. Sink owns its own progress
+        // so it persists across player interruptions and across players.
+        isWashing = false;
+        washSink = null;
     }
 
     private void UpdateKnifeEquip()
