@@ -56,6 +56,7 @@ public class Pickupable : MonoBehaviour
         if (cutProgress >= needed)
         {
             foodState = FoodState.Cut;
+            if (GameProgressTracker.Instance != null) GameProgressTracker.Instance.CompleteWork(1f);
             return true; // finished
         }
         return false;
