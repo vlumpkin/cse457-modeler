@@ -20,8 +20,8 @@ public class LobbyCountdownUI : MonoBehaviour
     [Header("Format")]
     [Tooltip("{0} is replaced with the seconds-remaining integer.")]
     public string format = "Starting in {0}...";
-    [Tooltip("Shown for the final frame at 0.")]
-    public string goText = "Go!";
+    [Tooltip("Shown during the final second before the game starts.")]
+    public string loadingText = "Loading...";
 
     void Awake()
     {
@@ -41,9 +41,10 @@ public class LobbyCountdownUI : MonoBehaviour
         if (!active) return;
 
         float remaining = manager.CountdownRemaining;
-        // Ceil so it reads "3, 2, 1" instead of "2, 1, 0" for a 3-second delay.
-        int secs = Mathf.CeilToInt(remaining);
-        string text = secs <= 0 ? goText : string.Format(format, secs);
+        // Display one less than the seconds remaining so a 4s delay reads
+        // "Starting in 3, 2, 1" and then "Loading..." during the final second.
+        int secs = Mathf.CeilToInt(remaining) - 1;
+        string text = secs <= 0 ? loadingText : string.Format(format, secs);
         if (legacyLabel != null) legacyLabel.text = text;
         if (tmpLabel != null) tmpLabel.text = text;
     }
