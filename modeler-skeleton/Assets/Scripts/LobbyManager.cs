@@ -32,12 +32,12 @@ public class LobbyManager : MonoBehaviour
 
     void Awake()
     {
-        if (inputManager == null) inputManager = FindFirstObjectByType<PlayerInputManager>();
+        if (inputManager == null) inputManager = FindAnyObjectByType<PlayerInputManager>();
     }
 
     void OnEnable()
     {
-        if (inputManager == null) inputManager = FindFirstObjectByType<PlayerInputManager>();
+        if (inputManager == null) inputManager = FindAnyObjectByType<PlayerInputManager>();
         if (inputManager != null)
         {
             inputManager.onPlayerJoined += HandleJoined;
@@ -129,17 +129,54 @@ public class LobbyManager : MonoBehaviour
 
         if (launching) return;
 
+        int lockedCount = CountLocked();
         bool ready = lobbyPlayers.Count >= minPlayersToStart && AllLocked();
+
         if (ready)
         {
-            if (allLockedTimer < 0f) allLockedTimer = 0f;
+            // First frame where everyone is locked → log the transition and start the timer.
+            if (allLockedTimer < 0f)
+            {
+                allLockedTimer = 0f;
+                Debug.Log($"[LobbyManager] All {lobbyPlayers.Count} player(s) locked at t={Time.time:F3}s — starting countdown ({startDelay:F2}s)");
+            }
+
+            float prev = allLockedTimer;
             allLockedTimer += Time.deltaTime;
-            if (allLockedTimer >= startDelay) Launch();
+
+            // Log each whole-second tick: "3...", "2...", "1...".
+            int prevSecLeft = Mathf.CeilToInt(startDelay - prev);
+            int nowSecLeft = Mathf.CeilToInt(startDelay - allLockedTimer);
+            if (nowSecLeft != prevSecLeft && nowSecLeft >= 0)
+                Debug.Log($"[LobbyManager] Countdown tick: {nowSecLeft} (elapsed {allLockedTimer:F3}s / {startDelay:F2}s) at t={Time.time:F3}s");
+
+            if (allLockedTimer >= startDelay)
+            {
+                Debug.Log($"[LobbyManager] Countdown complete at t={Time.time:F3}s (elapsed {allLockedTimer:F3}s) — calling Launch()");
+                Launch();
+            }
         }
         else
         {
+            // Was counting, now we're not — log why we cancelled.
+            if (allLockedTimer >= 0f)
+            {
+                string reason = lobbyPlayers.Count < minPlayersToStart
+                    ? $"player count dropped to {lobbyPlayers.Count} (< {minPlayersToStart})"
+                    : $"only {lockedCount}/{lobbyPlayers.Count} locked";
+                Debug.Log($"[LobbyManager] Countdown cancelled at t={Time.time:F3}s after {allLockedTimer:F3}s — {reason}");
+            }
             allLockedTimer = -1f;
         }
+    }
+
+
+    int CountLocked()
+    {
+        int c = 0;
+        for (int i = 0; i < lobbyPlayers.Count; i++)
+            if (lobbyPlayers[i] != null && lobbyPlayers[i].IsLocked) c++;
+        return c;
     }
 
 #if UNITY_EDITOR
@@ -159,6 +196,13 @@ public class LobbyManager : MonoBehaviour
     public LobbyPlayer GetPlayerInSlot(int slot)
         => (slot >= 0 && slot < lobbyPlayers.Count) ? lobbyPlayers[slot] : null;
 
+    // True once every joined player is locked in (and the countdown is running).
+    public bool CountdownActive => allLockedTimer >= 0f && !launching;
+
+    // Seconds remaining before the gameplay scene loads. -1 if countdown not running.
+    public float CountdownRemaining =>
+        allLockedTimer < 0f ? -1f : Mathf.Max(0f, startDelay - allLockedTimer);
+
     bool AllLocked()
     {
         if (lobbyPlayers.Count == 0) return false;
@@ -174,7 +218,18 @@ public class LobbyManager : MonoBehaviour
         for (int i = 0; i < lobbyPlayers.Count; i++)
         {
             var lp = lobbyPlayers[i];
-            if (lp != null) PlayerSelections.Set(lp.PlayerIndex, lp.ColorIndex, lp.ShapeIndex);
+            if (lp == null) continue;
+            var pi = lp.GetComponent<PlayerInput>();
+            int[] deviceIds = null;
+            string scheme = null;
+            if (pi != null)
+            {
+                var devs = pi.devices;
+                deviceIds = new int[devs.Count];
+                for (int d = 0; d < devs.Count; d++) deviceIds[d] = devs[d].deviceId;
+                scheme = pi.currentControlScheme;
+            }
+            PlayerSelections.Set(lp.PlayerIndex, lp.ColorIndex, lp.ShapeIndex, deviceIds, scheme);
         }
 
         // Stop further joins; gameplay scene takes over input wiring.
@@ -185,7 +240,7 @@ public class LobbyManager : MonoBehaviour
             Debug.LogError("[LobbyManager] gameSceneName not set — cannot transition.");
             return;
         }
-        if (verbose) Debug.Log($"[LobbyManager] Launching '{gameSceneName}' with {PlayerSelections.Count} player(s)");
+        if (verbose) Debug.Log($"[LobbyManager] Launching '{gameSceneName}' with {PlayerSelections.Count} player(s) at t={Time.time:F3}s");
         SceneManager.LoadScene(gameSceneName);
     }
 }
