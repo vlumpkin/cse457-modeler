@@ -8,4 +8,5 @@
   <Project Path="Unity.ProBuilder.KdTree.csproj" />
   <Project Path="Unity.ProBuilder.AddOns.Editor.csproj" />
   <Project Path="Unity.ProBuilder.AssetIdRemapUtility.csproj" />
+  <Project Path="Assembly-CSharp-Editor.csproj" />
 </Solution>
