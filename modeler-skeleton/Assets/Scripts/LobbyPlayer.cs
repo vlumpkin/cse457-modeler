@@ -89,11 +89,13 @@ public class LobbyPlayer : MonoBehaviour
     {
         locked = true;
         PlayerSelections.Set(PlayerIndex, colorIndex, shapeIndex);
+        Debug.Log($"[LobbyPlayer] P{PlayerIndex} LOCKED (color {colorIndex}, shape {shapeIndex}) at t={Time.time:F3}s");
     }
 
     void Unlock()
     {
         locked = false;
+        Debug.Log($"[LobbyPlayer] P{PlayerIndex} UNLOCKED at t={Time.time:F3}s");
     }
 
     int ShapeCount(int c)

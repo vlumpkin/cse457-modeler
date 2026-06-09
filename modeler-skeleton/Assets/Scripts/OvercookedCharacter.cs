@@ -258,8 +258,14 @@ public class OvercookedCharacter : MonoBehaviour
 
         // Arm containers live under the visual root (or directly under the frame if not split out).
         Transform visualSearchRoot = bodyVisualRoot != null ? bodyVisualRoot : transform;
-        leftArm = FindDescendant(visualSearchRoot, leftArmContainerName);
-        rightArm = FindDescendant(visualSearchRoot, rightArmContainerName);
+        // NOTE: Using Transform.Find (direct-child only) rather than FindDescendant
+        // to preserve the pre-Sink-merge knife/arm visual behavior. The arm containers
+        // are nested one level deeper in the Character prefab, so this resolves to
+        // null and the arm-pose code paths stay dormant — which is the state the
+        // prefab was visually tuned against. Swap back to FindDescendant once
+        // leftCarryEuler / rightCarryEuler / rest values are re-tuned.
+        leftArm = visualSearchRoot.Find(leftArmContainerName);
+        rightArm = visualSearchRoot.Find(rightArmContainerName);
 
         if (leftArm == null) Debug.LogWarning($"OvercookedCharacter: '{leftArmContainerName}' not found under {name}");
         if (rightArm == null) Debug.LogWarning($"OvercookedCharacter: '{rightArmContainerName}' not found under {name}");
@@ -281,7 +287,10 @@ public class OvercookedCharacter : MonoBehaviour
             hasPlacementAnchorRest = true;
         }
 
-        if (rightHoldingHand == null) rightHoldingHand = FindDescendant(transform, rightHoldingHandName);
+        // Same revert rationale as the arm containers above — keep this as a
+        // direct-child Find so the holding-hand anchor falls through to the
+        // synthesized HoldAnchor branch and the knife sits where it used to.
+        if (rightHoldingHand == null) rightHoldingHand = transform.Find(rightHoldingHandName);
         if (rightHoldingHand != null)
         {
             rightHoldingHandRestPos = rightHoldingHand.localPosition;
